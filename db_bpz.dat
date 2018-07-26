@@ -1,0 +1,9 @@
+euclid-vis=vis.dat
+sdss-u=filter-db/eazy/COSMOS_SDSS_filter_u.txt.fits
+sdss-g=filter-db/eazy/COSMOS_SDSS_filter_g.txt.fits
+sdss-r=filter-db/eazy/COSMOS_SDSS_filter_r.txt.fits
+sdss-i=filter-db/eazy/COSMOS_SDSS_filter_i.txt.fits
+sdss-z=filter-db/eazy/COSMOS_SDSS_filter_z.txt.fits
+vista-Y=filter-db/eazy/VISTA_Y_system+atmos.dat.fits
+vista-J=filter-db/eazy/VISTA_J_system+atmos.dat.fits
+vista-H=filter-db/eazy/VISTA_H_system+atmos.dat.fits

@@ -1,0 +1,378 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[top=3cm, bottom=3cm, left=3cm, right=3cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{color}
+\usepackage{xspace}
+\usepackage{graphicx}
+\usepackage[leftcaption]{sidecap}
+\usepackage{enumerate}
+\usepackage[page,titletoc]{appendix}
+\usepackage{braket}
+\usepackage{subfigure}
+\usepackage{wasysym}
+\usepackage{bbm}
+
+\newcommand\req[1]{Eq.\;\ref{#1}}
+\newcommand\rfig[1]{Fig.\;\ref{#1}}
+\newcommand\rapp[1]{Ann.\;\ref{#1}}
+
+\newcommand\eq[1]{\begin{align} #1 \end{align}}
+\newcommand\eqnl[1]{\begin{align*} #1 \end{align*}}
+
+\newcommand\eqc[1]{\begin{equation} #1 \end{equation}}
+\newcommand\eqcnl[1]{\begin{equation*} #1 \end{equation*}}
+\newcommand\evat[1]{\bigg|_{#1}}
+\newcommand\sameas{\Longleftrightarrow}
+\newcommand\Lsameas{\;\;\;\;\;\Longleftrightarrow\;\;\;\;\;}
+\newcommand\Limplies{\;\;\;\;\;\Longrightarrow\;\;\;\;\;}
+\newcommand\mst{<\!\!<}
+\newcommand\mgt{>\!\!>}
+\newcommand\prl{\;/\!/\;}
+\newcommand\ang{\text{\AA}}
+\newcommand\mean[1]{\left< #1 \right>}
+\newcommand{\norm}[1]{\left| #1 \right|}
+\newcommand{\snorm}[1]{| #1 |}
+\newcommand{\abs}[1]{\left| #1 \right|}
+\newcommand{\sabs}[1]{| #1 |}
+\newcommand{\lvec}[1]{\overrightarrow{#1}}
+\newcommand{\half}{\frac{1}{2}}
+\newcommand{\id}{\mathbf{1}}
+\newcommand{\tr}{\text{Tr}}
+\newcommand{\erf}{{\rm erf}}
+\newcommand{\erfc}{{\rm erfc}}
+
+\newcommand{\via}{{\it via}\xspace}
+
+\newcommand{\herschel}{{\it Herschel}\xspace}
+\newcommand{\spitzer}{{\it Spitzer}\xspace}
+\newcommand{\hubble}{{\it Hubble}\xspace}
+
+\newcommand{\mad}{{\rm MAD}}
+\newcommand{\median}{{\rm median}}
+\newcommand{\logd}{\log_{10}}
+\newcommand{\sfr}{{\rm SFR}}
+\newcommand{\sfruv}{{\rm SFR}_{\rm UV}}
+\newcommand{\sfrir}{{\rm SFR}_{\rm IR}}
+\newcommand{\sfrms}{{\rm SFR}_{\rm MS}}
+\newcommand{\ssfr}{{\rm sSFR}}
+\newcommand{\lir}{L_{\rm IR}}
+\newcommand{\luv}{L_{\rm UV}}
+\newcommand{\lsun}{L_\odot}
+\newcommand{\msun}{M_\odot}
+\newcommand{\yr}{{\rm yr}}
+\newcommand{\mstar}{M_\star}
+\newcommand{\snr}{{\rm SNR}}
+\newcommand{\uvj}{\text{\it UVJ}\xspace}
+\newcommand{\snu}{S_{\!\nu}}
+\newcommand{\tdust}{T_{\rm dust}}
+
+\newcommand{\halpha}{${\rm H}_\alpha$\xspace}
+\newcommand{\Ks}{${\rm K}_s$\xspace}
+\newcommand{\celib}{CE01\xspace}
+
+\newcommand{\msum}[1]{\displaystyle\sum\limits_{#1}}
+\newcommand{\mprod}[1]{\displaystyle\prod\limits_{#1}}
+\newcommand{\infint}{\int_{-\infty}^{+\infty}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\DD}{\mathrm{D}}
+\newcommand{\ddD}[1]{\mathrm{d}^{#1}}
+
+\newcommand{\der}[2]{\frac{\mathrm{d}#1}{\mathrm{d}#2}}
+\newcommand{\derb}[2]{\frac{\mathrm{d}^2 #1}{{\mathrm{d}#2}^2}}
+
+\newcommand{\pder}[2]{\frac{\partial#1}{\partial#2}}
+\newcommand{\pderb}[2]{\frac{\partial^2 #1}{{\partial#2}^2}}
+
+\newcommand{\fder}[2]{\frac{\delta#1}{\delta#2}}
+\newcommand{\fderb}[2]{\frac{\delta^2#1}{\delta^2#2}}
+\newcommand{\fderbb}[3]{\frac{\delta^2#1}{\delta#2\;\delta#3}}
+
+\newcommand{\com}[2]{\left[#1, #2\right]}
+\newcommand{\acom}[2]{\left\{#1, #2\right\}}
+
+\newcommand{\ind}{\indent\indent}
+
+\newcommand{\emptyline}{\vspace{5 mm}}
+\newcommand{\rmvline}{\vspace{-5 mm}}
+
+\newcommand{\vecd}[2]{\hspace{-#1 em}\vec{\hspace{#1 em}#2}}
+
+\newenvironment{dlist}{
+\begin{itemize}
+  \renewcommand{\labelitemi}{$\bullet$}
+  \setlength{\itemsep}{1pt}
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{itemize}}
+\newenvironment{slist}{
+\begin{itemize}
+  \renewcommand{\labelitemi}{$\ast$}
+  \setlength{\itemsep}{1pt}
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{itemize}}
+\newenvironment{elist}{
+\begin{itemize}
+  \renewcommand{\labelitemi}{}
+  \setlength{\itemsep}{1pt}
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{itemize}}
+\newenvironment{nlist}{
+\begin{enumerate}
+  \setlength{\itemsep}{1pt}
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{enumerate}}
+\newenvironment{alist}{
+\begin{enumerate}[a)]
+  \setlength{\itemsep}{1pt}
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{enumerate}}
+
+\newcommand{\emptypage}{\newpage\null\thispagestyle{empty}\newpage}
+
+\renewcommand\floatpagefraction{.9}
+\renewcommand\topfraction{.9}
+\renewcommand\bottomfraction{.9}
+\renewcommand\textfraction{.1}
+\setcounter{totalnumber}{50}
+\setcounter{topnumber}{50}
+\setcounter{bottomnumber}{50}
+
+\renewcommand\sidecaptionsep{10 mm}
+\numberwithin{equation}{section}
+
+\newcommand{\sectionR}[1]{\section{{\color{red}#1}}}
+\newcommand{\subsectionR}[1]{\subsection{{\color{red}#1}}}
+\newcommand{\subsubsectionR}[1]{\subsubsection{{\color{red}#1}}}
+
+\renewcommand{\id}{\mathbbm{1}}
+\newcommand{\ie}{i.e.\xspace}
+
+\begin{document}
+
+{\centering
+{\Huge EGG recipes for creating mock surveys}
+
+\centering by Corentin Schreiber\par
+}
+
+
+\section{Determining the SED of the bulge and disk for a given galaxy}
+
+We consider that each galaxy observed in a survey can be represented as a two-component system composed of a disk and a bulge. The mass ratio of each component is set by the bulge-to-total ratio, $f_B \equiv M_{\rm bulge}/M_{\rm disk+bulge}$. We attribute to each of these components a different SED, base on the recipes introduced in EGG (Schreiber et al.~2017b). These recipes are summarized here, and re-written in terms of probabilities to enable analytical calculations (instead of producing mock catalogs).
+
+Alongside the bulge-to-total ratio, we attribute two main physical parameters to each galaxy: its redshift ($z$) and its total stellar mass ($\mstar$). We also attribute each galaxy a type ($t$), which can be either ``star-forming'' (SF) or ``quiescent'' (QU). The end goal of the EGG recipes is to describe, for both the bulge and disk, the probability of occurrence of a SED ($s$) based on these four parameters: $z$, $\mstar$, $t$, and $f_B$. In other words, we aim to define the two probability densities:
+\begin{align}
+p_{\rm disk}(s | z, \mstar, t, f_B) \quad\quad\text{and}\quad\quad p_{\rm bulge}(s | z, \mstar, t, f_B)\,,
+\end{align}
+where $s$ is an integer index symbolizing one SED among a chosen finite set.
+
+The main idea behind EGG is that most of the diversity in galaxy SEDs can be captured by only two broadband colors, the rest-frame $(U-V)$ and $(V-J)$ colors (or \uvj diagram, see Williams et al.~2009), and that these colors are largely driven by the four parameters introduced above. Therefore, if we can build realistic probability distributions for the colors ($c_{UV}$ and $c_{V\!J}$, for short), and associate an SED to each color combination, then we can then generate a realistic distribution of SEDs.
+
+To this end, in Schreiber et al.~(2017b) we divided the $(U-V)$ vs $(V-J)$ color space into bins, and attributed an SED to each bin by averaging the best-fit Bruzual \& Charlot (2003) model of all the galaxies observed in the deep CANDELS fields that fell in said color bin. This resulted in a library of 252 unique SEDs. Given that each SED corresponds to the average SED in a bin of \uvj colors, we can write:
+\begin{align}
+p_{\rm disk}(s | z, \mstar, t, f_B) = \frac{\int_{c_{UV,l}(s)}^{c_{UV,u}(s)} \dd c_{UV} \int_{c_{V\!J,l}(s)}^{c_{V\!J,u}(s)} \dd c_{V\!J}\,p_{\rm disk}(c_{UV}, c_{V\!J} | z, \mstar, t, f_B)}{\sum_{s'} p_{\rm disk}(s' | z, \mstar, t, f_B)}
+\end{align}
+where $c_{UV,l}(s)$ and $c_{UV,u}(s)$ represent respectively the lower and upper bounds of the $(U-V)$ bin in which the SED $s$ was constructed (and likewise for $c_{V\!J,l}(s)$ and $c_{V\!J,u}(s)$).
+
+We then studied the observed location of galaxies on the \uvj diagram to construct the color distributions. Current data do not allow us to perform reliable color studies of disks and bulges separately, so we are limited to studying integrated colors of galaxies, and then make assumptions regarding how these integrated colors can be translated into bulge and disk colors.
+
+In particular, we made the following simplifying assumptions: the disk colors are independent of the galaxy's type $t$ and the bulge-to-total ratio $f_B$:
+\begin{align}
+p_{\rm disk}(c_{UV}, c_{V\!J} | z, \mstar, t, f_B) = p_{\rm disk}(c_{UV}, c_{V\!J} | z, \mstar)\,.
+\end{align}
+and the bulge colors are independent on the galaxy's type:
+\begin{align}
+p_{\rm bulge}(c_{UV}, c_{V\!J} | z, \mstar, t, f_B) = p_{\rm bulge}(c_{UV}, c_{V\!J} | z, \mstar, f_B)\,.
+\end{align}
+The final SED of the galaxy will eventually depend on the type $t$ through the dependence of $f_B$ and $\mstar$ on $t$; here we simply assume that at fixed $\mstar$ and $f_B$ the type can be ignored.
+
+We then assume that the colors can be split into two main classes: ``SF'' and ``QU'' (unrelated to the type $t$ of the galaxy), driven by the corresponding probability densities $p_{\rm SF}(c_{UV}, c_{V\!J} | z, \mstar)$ and $p_{\rm QU}(c_{UV}, c_{V\!J} | z, \mstar)$, which we assume only depend on mass and redshift. We then assume that disks only have ``SF'' colors, while bulges can be either ``SF'' or ``QU'' depending on $f_B$, such that:
+\begin{align}
+p_{\rm disk}(c_{UV}, c_{V\!J} | z, \mstar) &= p_{\rm SF}(c_{UV}, c_{V\!J} | z, \mstar)\,, \\
+p_{\rm bulge}(c_{UV}, c_{V\!J} | z, \mstar, f_B) &= \left\{\begin{array}{lll}
+p_{\rm QU}(c_{UV}, c_{V\!J} | z, \mstar) & \text{for} & f_B \ge 0.6 \\
+\frac{p_{\rm QU}(c_{UV}, c_{V\!J} | z, \mstar) + p_{\rm SF}(c_{UV}, c_{V\!J} | z, \mstar)}{2} & \text{for} & f_B < 0.6
+\end{array}\right.\,.
+\end{align}
+The rationale behind this choice is to allow classical bulges (which are quiescent) and pseudo bulges (which are still star-forming), and the adopted prescription was roughly tuned to match the observed relation between $f_B$ and integrated colors. Quiescent disks do exist but are quite rare, and they were therefore ignored.
+
+We then looked at the integrated colors of real galaxies, quiescent and star-forming, and in bins of mass and redshift, to build $p_{\rm SF}$ and $p_{\rm QU}$. We found the following (admittedly convoluted!) prescriptions provide an accurate description of the data.
+
+For ``SF'' colors. We noticed that galaxies cluster along a ``sequence'' (with some scatter), and move on this sequence depending on their mass and redshift. We therefore introduce a new intermediate quantity $A$, which is the ``intrinsic'' position of the galaxy on the sequence, such that:
+\begin{align}
+p_{\rm SF}(c_{UV}, c_{V\!J} | z, \mstar) = \int \dd A\,p(A | z, \mstar)\,p(c_{UV} | A,z)\,p(c_{V\!J} | A,z)\,,
+\end{align}
+
+Using the normal distribution
+\begin{align}
+G(x; \mu, \sigma) &= \frac{1}{\sigma\,\sqrt{2\pi}}\,\exp\left(-\frac{(x-\mu)^2}{2\,\sigma^2}\right)\,,
+\end{align}
+we set:
+\begin{align}
+p(A | z, \mstar) &= G(A; \bar{A}, \sigma_A)\,, \\
+\bar{A} &= \left\{\begin{array}{lll}
+\bar{A}^* & \text{for} & \bar{A}^* < 2\,, \\
+2 & \text{else,}
+\end{array}\right.\\
+\bar{A}^* &= \bar{A}_0 + \bar{A}_1\times\left\{\begin{array}{lll}
+z & \text{for} & z < 3.3\,, \\
+3.3 & \text{else,} \\
+\end{array}\right.\\
+\bar{A}_0 &= 1.39 + 0.58\,{\rm erf}\big[\log_{10}(\mstar/10^{10})\big]\,, \\
+\bar{A}_1 &= -0.34 + 0.30\times\left\{\begin{array}{lll}
+\log_{10}(\mstar) - 10.35 & \text{if} & > 0\,, \\
+0 & \text{else,} \\
+\end{array}\right. \\
+\sigma_A &= 0.1 + 0.3\times\left\{\begin{array}{lll}
+z-1 & \text{if} & 1 \le z < 2\, \\
+0 & \text{if} & z < 1\, \\
+1 & \text{if} & z \ge 2\, \\
+\end{array}\right\}\\
+&\times\left[0.17 + \left\{\begin{array}{lll}
+\log_{10}(\mstar) - 9.3 & \text{if} & 9.3 \le \log_{10}(\mstar) < 10.3 \\
+11.3 - \log_{10}(\mstar) & \text{if} & 10.3 \le \log_{10}(\mstar) < 11.3 \\
+0 & \text{else}
+\end{array}\right.\right]\,, \\
+p(c_{UV} | A, z) &= G(c_{UV}; 2\,c_z(z)+0.45+0.545\,A, 0.12)\,, \\
+p(c_{V\!J} | A, z) &= G(c_{V\!J}; c_z(z)+0.838\,A, 0.12)\,, \\
+c_z(z) &= \left\{\begin{array}{lll}
+(0.5 - z)/0.5 & \text{if} & z < 0.5\,, \\
+0 & \text{else.} \\
+\end{array}\right.
+\end{align}
+The latter, $c_z(z)$, is a color correction term for low redshift galaxies ($z<0.5$), which was found necessary when comparing our prescriptions (originally calibrated only at $0.5<z<3.0$) against observations of low redshift galaxies (GAMA).
+
+For ``QU'' galaxies the prescription is a little simpler, but follows the same philosophy. Galaxies also cluster along a sequence (which can be identified as the ``red sequence''), which we parametrize with the intermediate variable $B$:
+\begin{align}
+p_{\rm QU}(c_{UV}, c_{V\!J} | z, \mstar) = \int \dd B\,p(B | z, \mstar)\,p(c_{UV} | B,z)\,p(c_{V\!J} | B,z)\,.
+\end{align}
+Using the step function
+\begin{align}
+U(x) = \left\{\begin{array}{lll}
+1 & \text{for} & x \ge 0\, \\
+0 & \text{for} & x < 0\, \\
+\end{array}\right.\,,
+\end{align}
+and Dirac ``delta'' function
+\begin{align}
+\delta(x) = \lim_{\sigma \to 0}\,G(x; 0, \sigma)\,,
+\end{align}
+we set:
+\begin{align}
+p(B | z, \mstar) &= G(B; \bar{B}, 0.1)\,U(-0.1-B)\,U(B-0.2) + \beta_l\,\delta(B+0.1) + \beta_u\,\delta(B-0.2) \\
+\beta_l &= \int_{-\infty}^{-0.1}\dd B\,G(B; \bar{B}, 0.1) = \frac{1}{2} + \frac{1}{2}\,{\rm erf}\left[\frac{-0.1-\bar{B}}{0.1\,\sqrt{2}}\right]\\
+\beta_u &= \int_{0.2}^{+\infty}\dd B\,G(B; \bar{B}, 0.1) = \frac{1}{2} - \frac{1}{2}\,{\rm erf}\left[\frac{0.2-\bar{B}}{0.1\,\sqrt{2}}\right]\\
+\bar{B} &= 0.1\,\log_{10}(\mstar/10^{11}) \\
+p(c_{UV} | B,z) &= G(c_{UV}; 2\,c_z(z)+1.85+0.88\,B, 0.10) \\
+p(c_{V\!J} | B,z) &= G(c_{V\!J}; c_z(z)+1.25+B, 0.10)
+\end{align}
+
+\section{Determining the fundamental properties of galaxies}
+
+With these color (or SED) distributions in place, all we are left to do is plug in distributions for the base parameters, namely: $z$, $\mstar$, $t$, and $f_B$.
+
+We start by $f_B$. Lang et al.~(2014) presented distributions of $f_B$ for galaxies at $z=1$ and $z=2$, and found these distributions to be independent on redshift, but strongly dependent on mass and galaxy type (SF or QU), with a residual random scatter. The following is based on their observations. Using the log-normal distribution
+\begin{align}
+LN(x; \mu, \sigma) &= \frac{1}{x\,\sigma\,\sqrt{2\pi}}\,\exp\left(-\frac{\log(x/\mu)^2}{2\,\sigma^2}\right)\,,
+\end{align}
+we set:
+\begin{align}
+p(f_B | \mstar, t) &= LN(f_B; \bar{f}_B, 0.2)\,U(1 - f_B) + \alpha_1\,\delta(f_B - 1)  \\
+\alpha_1 &= \int_1^{+\infty}\dd f_B\, LN(f_B; \bar{f}_B, 0.2)
+= \frac{1}{2} + \frac{1}{2}\,{\rm erf}\left[\frac{\log(\bar{f}_B)}{0.2\,\sqrt{2}}\right]\,, \\
+\bar{f}_B &= \left\{\begin{array}{lll}
+0.2\,(\mstar/10^{10})^{0.27} & \text{for} & t={\rm SF}\,, \\
+0.5\,(\mstar/10^{10})^{0.10} & \text{for} & t={\rm QU}\,.
+\end{array}\right.
+\end{align}
+
+We then proceed with $z$, $t$ and $\mstar$. For these, we use the observed stellar mass functions of star-forming and quiescent galaxies, separetely, where the SF/QU separation was done in the \uvj diagram. The observed stellar mass distributions in bins of redshift were fit with double Schechter functions; See Schreiber et al.~(2017b) for the fit parameters. The mass functions are extended to $z=0$ using Baldry et al.~(2012) and to $z>4$ using Grazian et al.~(2016). Here we note these as:
+\begin{align}
+\frac{\dd N(z, \mstar, t)}{\dd \mstar\,\dd V}\,.
+\end{align}
+since this is the number of galaxies per bin of stellar mass and per unit comoving volume.
+
+In a survey, we observe galaxies in bins of redshift which get projected within a fixed area on the sky, and this corresponds to a different comoving volume depending on the chosen redshift slice. To get the number of observed galaxy in our survey, we therefore need to compute and integrate
+\begin{align}
+\frac{\dd N(z, \mstar, t)}{\dd \mstar\,\dd z} = \frac{\mathcal{A}}{4\,\pi}\,\frac{\dd V(z)}{\dd z}\,\frac{\dd N(z, \mstar, t)}{\dd \mstar\,\dd V}\,,
+\end{align}
+where $\mathcal{A}$ is the sky area covered by our survey in steradians (this value is actually irrelevant for our predictions, so we picked $1\,{\rm deg}^2$), and $V(z)$ is the comoving volume of the Universe contained within a radius of $D_C(z)$ (the comoving distance).
+
+\section{The PSF of a galaxy}
+
+Using the Euclid PSF toolkit, we generated PSFs for each of the 252 SEDs in the EGG library, redshifted on a fine grid with step $\Delta z = 0.001$. For reach of these PSFs, we computed the moments: $Q_{11}$, $Q_{12}$, and $Q_{22}$, which are essentially:
+\begin{align}
+Q_{11} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,(x - \bar{x})^2}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
+Q_{12} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,(x - \bar{x})\,(y - \bar{y})}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
+Q_{22} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,(y - \bar{y})^2}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
+\end{align}
+with
+\begin{align}
+\bar{x} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,x}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
+\bar{y} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,y}{\sum_{x, y} {\rm PSF}(x,y)}\,,
+\end{align}
+(where, in practice, the PSF is multiplied by a constant 2D Gaussian function of $\sigma=0.7"$, which attenuates the pixels further away from the center and stabilizes the moments, and where the process is iterated until $\bar{x}$ and $\bar{y}$ converge).
+
+When summing two PSFs, and assuming the centroids $(\bar{x},\bar{y})$ are identical, the moments of the summed PSF are the weighted averages of the moments of each PSF (where the weights are the relative flux in each PSF). This means that, for an SED $s$, we can actually write the moments of the corresponding PSF as an integral over wavelengths:
+\begin{align}
+Q_s = \frac{\int \dd\lambda\,f_s(\lambda)\,R(\lambda)\,Q(\lambda)}{\int \dd\lambda f_s(\lambda)\,R(\lambda)}\,,
+\end{align}
+where $f_s$ is the flux density (per unit wavelength) of the SED, $R(\lambda)$ is the energy response of the instrument (a factor $\lambda$ times the quantum efficiency), and $Q(\lambda)$ is the moment of the monochromatic PSF at the wavelength $\lambda$.
+
+For a galaxy composed of a disk and a bulge of SEDs $d$ and $b$ (respectively), the total flux density can be written:
+\begin{align}
+f_{\rm tot}(\lambda, f_B, d, b) = f_B\,f_b(\lambda) + (1-f_B)\,f_d(\lambda)\,.
+\end{align}
+Plugging this in the above integral, we can then express the moment corresponding to this SED as:
+\begin{align}
+Q_{\rm tot}(f_B, d, b) = \hat{f}_B(d,b)\,Q_b + (1 - \hat{f}_B(d,b))\,Q_d,
+\end{align}
+where $\hat{f}_B(d,b)$ is the \emph{flux-weighted} bulge-to-total ratio:
+\begin{align}
+\hat{f}_B(d,b) = \frac{\int \dd\lambda f_B\,f_b(\lambda)\,R(\lambda)}{\int \dd\lambda f_{tot}(\lambda, f_B, d, b)\,R(\lambda)}
+\end{align}
+
+\section{The observed flux of a galaxy}
+
+In EGG, the flux density per unit stellar mass of an SED $s$ is:
+\begin{align}
+\bar{f}_s(\lambda, z) = 10^{-C_{\rm M/L}(z)}\,\bar{f}_{s,{\rm base}}(\lambda)\,,
+\end{align}
+where $C_{\rm M/L}(z)$ is a simple piece-wise linear function, which corrects for varying mass-to-light ratio at fixed \uvj colors. Since this correction term is wavelength-independent, it can be ignored when computing the effective PSF, but it will impact the total flux of the galaxy, and therefore whether the galaxy is above the survey detection limit or not.
+
+The total flux density of the galaxy is thus:
+\begin{align}
+f_{\rm tot}(\lambda, \mstar, z, f_B, d, b) = \mstar\left[f_B\,\bar{f}_b(\lambda, z) + (1-f_B)\,\bar{f}_d(\lambda, z)\right]\,,
+\end{align}
+where $d$ is the disk SED and $b$ is the bulge SED. We can finally integrate this within the passband of the selection band (i.e., VIS for Euclid?):
+\begin{align}
+F_{\rm tot}(\mstar, z, f_B, d, b) = \frac{\int \dd\lambda\,f_{\rm tot}(\lambda, \mstar, z, f_B, d, b)\,R(\lambda)}{\int \dd\lambda\,R(\lambda)}\,,
+\end{align}
+
+\section{The average PSF in a redshift slice}
+
+Using all the above, we can finally write down the average moments of the PSF in a given redshift slice $z_a < z < z_b$, and for a given flux detection limit $F > F_{\rm lim}$:
+\begin{align}
+\mean{Q}(F &> F_{\rm lim}, z_a < z < z_b) \nonumber \\
+&\propto \int_{z_a}^{z_b}\dd z\sum_{t=\{{\rm SF,QU}\}}\int_0^{+\infty} \dd \mstar\,\frac{\dd N(z, \mstar, t)}{\dd \mstar\, \dd z} \int_0^1\dd f_B\,p(f_B | \mstar,t) \nonumber \\
+&\quad\quad \sum_{d=1}^{N_{\rm SED}} p_{\rm disk}(d | z,\mstar) \sum_{b=1}^{N_{\rm SED}}p_{\rm bulge}(b | z,\mstar,f_B) \nonumber \\
+&\quad\quad\quad\quad U[F_{\rm tot}(\mstar, z, f_B, d, b) - F_{\rm lim}]\,Q_{\rm tot}(f_B, d, b)\,.
+\end{align}
+where the term $U[...]$ enforces the survey detection limit.
+
+In practice, we run the integral over $\mstar$ from $M_{\rm lim}(F_{\rm lim},z)$ to $10^{13}\,\msun$. The former is the minimum stellar mass we can expect given the flux detection limit, our SED library, and the redshift $z$:
+\begin{align}
+M_{\rm lim}(F_{\rm lim},z) = \min_{s} \frac{F_{\rm lim}}{\bar{F}_s(z)}\,,
+\end{align}
+where $\bar{F}_s(z)$ is the broadband flux per unit mass of the SED $s$ at redshift $z$.
+
+\end{document}
+
