@@ -1,9 +1,11 @@
 #include "egg-analytic.hpp"
+#include "metrics.hpp"
 
 class psf_averager : public egg::generator {
 public :
     // Average PSF metrics
-    double q11 = 0, q12 = 0, q22 = 0, ngal = 0;
+    metrics m_all;
+    double ngal = 0;
 
     // PSF library
     vec1s ssed, zz;
@@ -61,9 +63,9 @@ public :
             const double fbti = 1.0 - fbtn;
 
             // Add up PSFs
-            q11 += (dq11*fbti + bq11*fbtn)*tngal;
-            q12 += (dq12*fbti + bq12*fbtn)*tngal;
-            q22 += (dq22*fbti + bq22*fbtn)*tngal;
+            m_all += tngal*metrics(
+                dq11*fbti + bq11*fbtn, dq12*fbti + bq12*fbtn, dq22*fbti + bq22*fbtn
+            );
 
             ngal += tngal;
         }
@@ -75,7 +77,7 @@ public :
         if (!file::exists(filename)) return false;
 
         // Read PSF library
-        ascii::read_table(filename, 0, ssed, zz, _, _, _, mq11, mq12, mq22);
+        ascii::read_table(filename, ssed, zz, _, _, _, mq11, mq12, mq22);
 
         phypp_check(!zz.empty(), "empty PSF file '", filename, "'");
 
@@ -119,7 +121,8 @@ public :
 
         // Start averaging
         auto pg = progress_start(ntz);
-        vec1d zq11(ntz), zq12(ntz), zq22(ntz), dndz(ntz);
+        vec<1,metrics> zm(ntz);
+        vec1d dndz(ntz);
         for (uint_t itz : range(ntz)) {
             double zf = uzf.safe[itz];
             double dz = (itz == 0 ? uzf.safe[1] - uzf.safe[0] : uzf.safe[itz] - uzf.safe[itz-1]);
@@ -136,20 +139,17 @@ public :
             ipsf_b = bz[0];
 
             // Reset
-            q11 = 0; q12 = 0; q22 = 0; ngal = 0;
+            m_all.reset();
+            ngal = 0;
 
             // Compute average at that redshift
             generate(zf, dz);
 
             // Average quantities
-            q11 /= ngal;
-            q12 /= ngal;
-            q22 /= ngal;
+            m_all /= ngal;
 
             // Store
-            zq11[itz] = q11;
-            zq12[itz] = q12;
-            zq22[itz] = q22;
+            zm[itz] = m_all;
             dndz[itz] = ngal/dz;
 
             progress(pg);
@@ -157,13 +157,12 @@ public :
 
         // Average over N(z)
         double ntot = integrate(uzf, dndz);
-        q11 = integrate(uzf, zq11*dndz)/ntot;
-        q12 = integrate(uzf, zq12*dndz)/ntot;
-        q22 = integrate(uzf, zq22*dndz)/ntot;
+        vec1d ndndz = dndz/ntot;
+        m_all = integrate(uzf, zm*ndndz);
 
         fits::write_table(zdir+"psf-mean-"+suffix+".fits",
-            "z", uzf, "dndz", dndz, "q11", zq11, "q12", zq12, "q22", zq22,
-            "e1", (zq11-zq22)/(zq11+zq22), "e2", 2*zq12/(zq11+zq22), "r2", zq11+zq22);
+            "z", uzf, "dndz", dndz, "q11", get_q11(zm), "q12", get_q12(zm), "q22", get_q22(zm),
+            "e1", get_e1(zm), "e2", get_e2(zm), "r2", get_r2(zm));
 
         return true;
     }
@@ -185,13 +184,13 @@ int phypp_main(int argc, char* argv[]) {
 
     // Setup survey
     egg::generator_options opts;
-    opts.filter_db = "/home/cschreib/code/egg-analytic/db.dat";
+    opts.filter_db = "/home/cschreib/work_psf/scripts/psf-averager/filters.dat";
     opts.share_dir = "/home/cschreib/code/egg/share/";
     opts.selection_band = selection_band;
     opts.filter_flambda = true;
     opts.filter_photons = true;
-    opts.logmass_steps = 50;
-    opts.bt_steps = 5;
+    opts.logmass_steps = 100;
+    opts.bt_steps = 20;
     opts.seds_step = seds_step;
     opts.maglim = maglim;
     pavg.initialize(opts);
@@ -200,20 +199,23 @@ int phypp_main(int argc, char* argv[]) {
     vec1d q11 = replicate(dnan, nzbin);
     vec1d q12 = replicate(dnan, nzbin);
     vec1d q22 = replicate(dnan, nzbin);
+    vec1d e1 =  replicate(dnan, nzbin);
+    vec1d e2 =  replicate(dnan, nzbin);
+    vec1d r2 =  replicate(dnan, nzbin);
 
     for (uint_t iz : range(nzbin)) {
         if (!pavg.average_redshift_bin(iz, suffix)) continue;
 
         // Save average moments
-        q11[iz] = pavg.q11;
-        q12[iz] = pavg.q12;
-        q22[iz] = pavg.q22;
+        q11[iz] = pavg.m_all.q11;
+        q12[iz] = pavg.m_all.q12;
+        q22[iz] = pavg.m_all.q22;
+        e1[iz] = pavg.m_all.e1;
+        e2[iz] = pavg.m_all.e2;
+        r2[iz] = pavg.m_all.r2;
     }
 
     // Recompute ellipticity from moments
-    vec1d e1 = (q11 - q22)/(q11 + q22);
-    vec1d e2 = (2*q12)/(q11 + q22);
-    vec1d r2 = q11 + q22;
 
     fits::write_table("psf-mean-"+suffix+".fits", ftable(zb, e1, e2, r2, q11, q12, q22));
 
