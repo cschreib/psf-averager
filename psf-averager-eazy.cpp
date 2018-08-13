@@ -876,7 +876,7 @@ int phypp_main(int argc, char* argv[]) {
     opts.maglim = maglim;
     opts.logmass_steps = 50;
     opts.bt_steps = 5;
-    // opts.mass_max = 12.0;
+    opts.logmass_max = 12.0;
     opts.seds_step = seds_step;
     pavg.initialize(opts);
 
