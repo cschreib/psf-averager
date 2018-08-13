@@ -33,20 +33,21 @@ public :
     vec1d zfit;
     uint_t nmodel = npos;
     uint_t nzfit = npos;
-
-    // Internal variables
-    vec1d wflux, rflux, weight;
-    vec2d wmodel;
-    vec2d tpl_flux;
     uint_t ntemplate = npos;
     uint_t nelliptical = npos;
     uint_t nspiral = npos;
     uint_t nirregular = npos;
+
+    // Internal variables
     vec1d pmodel;
     vec1d prior;
     vec1d tt_prior;
     vec1d pz, pzc;
+
+    vec1d wflux, rflux, weight;
+    vec2d wmodel;
     vec1d wmm;
+    vec2d tpl_flux;
 
     vec1d zmeas_ml, zmeas_ma, cache_pmodel;
     vec1u cache_bmodel;
@@ -347,7 +348,9 @@ public :
         from_string(replace(bpz_zz, "p", "."), bpz_z);
     }
 
-    void set_priors(double mag) {
+    void set_priors(const vec1d& fdisk, const vec1d& fbulge) override {
+        double mag = -2.5*log10(fdisk.safe[id_prior] + fbulge.safe[id_prior]) + 23.9;
+
         double momin;
         vec1d alpha, z0, km, kt, ft;
 
@@ -471,45 +474,39 @@ public :
         }
     }
 
-    void do_fit(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
+    void compute_averages(uint_t id_type, double tngal) {
+        // Maximum likelihood
+        // ------------------
 
-        if (cache_available) {
-            // A cache is present and we can reuse it!
-            fitter_cache.read_elements("bmodel", cache_bmodel, fits::at(iter,_));
-            fitter_cache.read_elements("pmodel", cache_pmodel, fits::at(iter,_));
+        metrics ml;
+        metrics ml2;
+        for (uint_t i : range(nmc)) {
+            uint_t iml = cache_bmodel.safe(i);
+            metrics tm(bpz_q11_fit.safe[iml], bpz_q12_fit.safe[iml], bpz_q22_fit.safe[iml]);
+            ml  += tm;
+            ml2 += sqr(tm);
+        }
+        ml /= nmc;
+        ml2 /= nmc;
+        ml2 = sqrt(ml2 - sqr(ml));
 
-            // Maximum likelihood
-            // ------------------
+        m_ml.add(id_type, tngal*ml);
 
-            metrics ml;
-            metrics ml2;
-            for (uint_t i : range(nmc)) {
-                uint_t iml = cache_bmodel.safe(i);
-                metrics tm(bpz_q11_fit.safe[iml], bpz_q12_fit.safe[iml], bpz_q22_fit.safe[iml]);
-                ml  += tm;
-                ml2 += sqr(tm);
-            }
-            ml /= nmc;
-            ml2 /= nmc;
-            ml2 = sqrt(ml2 - sqr(ml));
+        // Marginalization
+        // ---------------
 
-            m_ml.add(id_type, tngal*ml);
+        metrics ma;
+        metrics ma2;
+        for (uint_t im : range(nmodel)) {
+            metrics tm(bpz_q11_fit.safe[im], bpz_q12_fit.safe[im], bpz_q22_fit.safe[im]);
+            ma  += cache_pmodel.safe[im]*tm;
+            ma2 += cache_pmodel.safe[im]*sqr(tm);
+        }
+        ma2 = sqrt(ma2 - sqr(ma));
 
-            // Marginalization
-            // ---------------
+        m_ma.add(id_type, tngal*ma);
 
-            metrics ma;
-            metrics ma2;
-            for (uint_t im : range(nmodel)) {
-                metrics tm(bpz_q11_fit.safe[im], bpz_q12_fit.safe[im], bpz_q22_fit.safe[im]);
-                ma  += cache_pmodel.safe(im)*tm;
-                ma2 += cache_pmodel.safe(im)*sqr(tm);
-            }
-            ma2 = sqrt(ma2 - sqr(ma));
-
-            m_ma.add(id_type, tngal*ma);
-
+        if (write_cache) {
             fitter_cache.update_elements("e1_bpz_ml", ml.e1,      fits::at(iter));
             fitter_cache.update_elements("e2_bpz_ml", ml.e2,      fits::at(iter));
             fitter_cache.update_elements("r2_bpz_ml", ml.r2,      fits::at(iter));
@@ -522,182 +519,147 @@ public :
             fitter_cache.update_elements("e1_bpz_ma_err", ma2.e1, fits::at(iter));
             fitter_cache.update_elements("e2_bpz_ma_err", ma2.e2, fits::at(iter));
             fitter_cache.update_elements("r2_bpz_ma_err", ma2.r2, fits::at(iter));
-        } else {
-            // No cached data, must recompute stuff
+        }
+    }
 
-            // Create noise-free photometry
+    void process_cached(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
+
+        fitter_cache.read_elements("bmodel", cache_bmodel, fits::at(iter,_));
+        fitter_cache.read_elements("pmodel", cache_pmodel, fits::at(iter,_));
+
+        compute_averages(id_type, tngal);
+    }
+
+    void do_fit(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
+
+        // Create noise-free photometry
+        for (uint_t l : range(nband)) {
+            double bftot = fdisk.safe[l+1] + fbulge.safe[l+1];
+            weight.safe[l] = 1.0/sqrt(phot_err2.safe[l] + sqr(bftot*rel_err));
+            rflux.safe[l] = wflux.safe[l] = bftot*weight.safe[l];
+        }
+
+        // Create models
+        for (uint_t im : range(nmodel)) {
+            wmm.safe[im] = 0.0;
             for (uint_t l : range(nband)) {
-                double bftot = fdisk.safe[l+1] + fbulge.safe[l+1];
-                weight.safe[l] = 1.0/sqrt(phot_err2.safe[l] + sqr(bftot*rel_err));
-                rflux.safe[l] = wflux.safe[l] = bftot*weight.safe[l];
-            }
-
-            // Create models
-            for (uint_t im : range(nmodel)) {
-                wmm.safe[im] = 0.0;
-                for (uint_t l : range(nband)) {
-                    wmodel.safe(im,l) = tpl_flux.safe(im,l)*weight.safe[l];
-                    wmm.safe[im] += sqr(wmodel.safe(im,l));
-                }
-            }
-
-            // Create priors
-            double pmag = -2.5*log10(fdisk.safe[id_prior] + fbulge.safe[id_prior]) + 23.9;
-            set_priors(pmag);
-
-            if (write_cache) {
-                cache_pmodel[_] = 0.0;
-            }
-
-            // Simulate redshift measurements
-            metrics ma, ml, ma2, ml2;
-            for (uint_t i : range(nmc)) {
-                // Create noisy photometry
-                if (!no_noise) {
-                    for (uint_t l : range(nband)) {
-                        // In weighted units, the random perturbations have a sigma of unity
-                        rflux.safe[l] = wflux.safe[l] + mc.safe(i,l);
-                    }
-                }
-
-                // Find best SED and z, and store chi2 to build p(z,SED)
-                uint_t iml = npos;
-                double chi2_best = finf;
-                for (uint_t im : range(nmodel)) {
-                    double* wm = &wmodel.safe(im,0);
-                    double* wf = &rflux.safe[0];
-
-                    double wfm = 0.0;
-                    for (uint_t l : range(nband)) {
-                        wfm += wf[l]*wm[l];
-                    }
-
-                    double scale = wfm/wmm.safe[im];
-
-                    double tchi2 = 0.0;
-                    for (uint_t l : range(nband)) {
-                        tchi2 += sqr(wf[l] - scale*wm[l]);
-                    }
-
-                    pmodel.safe[im] = tchi2;
-
-                    if (tchi2 < chi2_best) {
-                        chi2_best = tchi2;
-                        iml = im;
-                    }
-                }
-
-                // Create likelihood, apply prior, and marginalize over SEDs to build p(z)
-                for (uint_t iz : range(nzfit)) {
-                    pz.safe[iz] = 0.0;
-                    for (uint_t it : range(ntemplate)) {
-                        uint_t im = iz*ntemplate + it;
-                        pmodel.safe[im] = exp(-0.5*(pmodel.safe[im] - chi2_best))*prior.safe[im];
-                        pz.safe[iz] += pmodel.safe[im];
-                    }
-                }
-
-                // Convolve p(z) with Gaussian to avoid too many peaks
-                double pmax = 0.0;
-                for (uint_t iz : range(nzfit)) {
-                    // Convolve
-                    uint_t i0 = iz > wconv ? iz - wconv : 0;
-                    uint_t i1 = iz < nzfit-1-wconv ? iz + wconv : nzfit-1;
-                    pzc.safe[iz] = 0.0;
-                    for (uint_t tiz : range(i0, i1+1)) {
-                        uint_t iconv = (int_t(tiz)-int_t(iz)) + wconv;
-                        pzc.safe[iz] += pz.safe[tiz]*gconv.safe[iconv];
-                    }
-
-                    if (pzc.safe[iz] > pmax) {
-                        pmax = pzc.safe[iz];
-                    }
-                }
-
-                // Clip too low values, and then apply this back to the p(z,SED)
-                // This is done to mimick as closely as possible the behavior of BPZ.
-                double tprob = 0.0;
-                for (uint_t iz : range(nzfit)) {
-                    // Clip
-                    if (pzc.safe[iz] < 1e-2*pmax) {
-                        pzc.safe[iz] = 0;
-                    }
-
-                    // Update the p(z,SED)
-                    for (uint_t it : range(ntemplate)) {
-                        uint_t im = iz*ntemplate + it;
-
-                        if (pz.safe[iz] > 0.0) {
-                            pmodel.safe[im] *= pzc.safe[iz]/pz.safe[iz];
-                        }
-
-                        tprob += pmodel.safe[im];
-                    }
-                }
-
-                pmodel /= tprob;
-
-                if (write_cache) {
-                    zmeas_ml.safe[i] = zfit.safe[iml/ntemplate];
-                    zmeas_ma.safe[i] = total(zfit*pzc)/total(pzc);
-
-                    cache_bmodel.safe[i] = iml;
-                    cache_pmodel += pmodel;
-                }
-
-                // Maximum likelihood
-                // ------------------
-
-                metrics tml(bpz_q11_fit.safe[iml], bpz_q12_fit.safe[iml], bpz_q22_fit.safe[iml]);
-                ml += tml;
-                ml2 += sqr(tml);
-
-                // Marginalization
-                // ---------------
-
-                metrics tma;
-                for (uint_t im : range(nmodel)) {
-                    tma += pmodel.safe[im]*metrics(
-                        bpz_q11_fit.safe[im], bpz_q12_fit.safe[im], bpz_q22_fit.safe[im]
-                    );
-                }
-
-                ma += tma;
-                ma2 += sqr(tma);
-            }
-
-            ml /= nmc;
-            ml2 /= nmc;
-            ml2 = sqrt(ml2 - sqr(ml));
-            ma /= nmc;
-            ma2 /= nmc;
-            ma2 = sqrt(ma2 - sqr(ma));
-
-            m_ml.add(id_type, tngal*ml);
-            m_ma.add(id_type, tngal*ma);
-
-            if (write_cache) {
-                cache_pmodel /= nmc;
-
-                fitter_cache.update_elements("pmag",      pmag,         fits::at(iter));
-                fitter_cache.update_elements("pmodel",    cache_pmodel, fits::at(iter,_));
-                fitter_cache.update_elements("bmodel",    cache_bmodel, fits::at(iter,_));
-                fitter_cache.update_elements("zmeas_ml",  zmeas_ml,     fits::at(iter,_));
-                fitter_cache.update_elements("zmeas_ma",  zmeas_ma,     fits::at(iter,_));
-                fitter_cache.update_elements("e1_bpz_ml", ml.e1,        fits::at(iter));
-                fitter_cache.update_elements("e2_bpz_ml", ml.e2,        fits::at(iter));
-                fitter_cache.update_elements("r2_bpz_ml", ml.r2,        fits::at(iter));
-                fitter_cache.update_elements("e1_bpz_ma", ma.e1,        fits::at(iter));
-                fitter_cache.update_elements("e2_bpz_ma", ma.e2,        fits::at(iter));
-                fitter_cache.update_elements("r2_bpz_ma", ma.r2,        fits::at(iter));
-                fitter_cache.update_elements("e1_bpz_ml_err", ml2.e1,   fits::at(iter));
-                fitter_cache.update_elements("e2_bpz_ml_err", ml2.e2,   fits::at(iter));
-                fitter_cache.update_elements("r2_bpz_ml_err", ml2.r2,   fits::at(iter));
-                fitter_cache.update_elements("e1_bpz_ma_err", ma2.e1,   fits::at(iter));
-                fitter_cache.update_elements("e2_bpz_ma_err", ma2.e2,   fits::at(iter));
-                fitter_cache.update_elements("r2_bpz_ma_err", ma2.r2,   fits::at(iter));
+                wmodel.safe(im,l) = tpl_flux.safe(im,l)*weight.safe[l];
+                wmm.safe[im] += sqr(wmodel.safe(im,l));
             }
         }
+
+        for (uint_t im : range(nmodel)) {
+            cache_pmodel.safe[im] = 0.0;
+        }
+
+        // Simulate redshift measurements
+        for (uint_t i : range(nmc)) {
+            // Create noisy photometry
+            if (!no_noise) {
+                for (uint_t l : range(nband)) {
+                    // In weighted units, the random perturbations have a sigma of unity
+                    rflux.safe[l] = wflux.safe[l] + mc.safe(i,l);
+                }
+            }
+
+            // Find best SED and z, and store chi2 to build p(z,SED)
+            uint_t iml = npos;
+            double chi2_best = finf;
+            for (uint_t im : range(nmodel)) {
+                double* wm = &wmodel.safe(im,0);
+                double* wf = &rflux.safe[0];
+
+                double wfm = 0.0;
+                for (uint_t l : range(nband)) {
+                    wfm += wf[l]*wm[l];
+                }
+
+                double scale = wfm/wmm.safe[im];
+
+                double tchi2 = 0.0;
+                for (uint_t l : range(nband)) {
+                    tchi2 += sqr(wf[l] - scale*wm[l]);
+                }
+
+                pmodel.safe[im] = tchi2;
+
+                if (tchi2 < chi2_best) {
+                    chi2_best = tchi2;
+                    iml = im;
+                }
+            }
+
+            // Create likelihood, apply prior, and marginalize over SEDs to build p(z)
+            for (uint_t iz : range(nzfit)) {
+                pz.safe[iz] = 0.0;
+                for (uint_t it : range(ntemplate)) {
+                    uint_t im = iz*ntemplate + it;
+                    pmodel.safe[im] = exp(-0.5*(pmodel.safe[im] - chi2_best))*prior.safe[im];
+                    pz.safe[iz] += pmodel.safe[im];
+                }
+            }
+
+            // Convolve p(z) with Gaussian to avoid too many peaks
+            double pmax = 0.0;
+            for (uint_t iz : range(nzfit)) {
+                // Convolve
+                uint_t i0 = iz > wconv ? iz - wconv : 0;
+                uint_t i1 = iz < nzfit-1-wconv ? iz + wconv : nzfit-1;
+                pzc.safe[iz] = 0.0;
+                for (uint_t tiz : range(i0, i1+1)) {
+                    uint_t iconv = (int_t(tiz)-int_t(iz)) + wconv;
+                    pzc.safe[iz] += pz.safe[tiz]*gconv.safe[iconv];
+                }
+
+                if (pzc.safe[iz] > pmax) {
+                    pmax = pzc.safe[iz];
+                }
+            }
+
+            // Clip too low values, and then apply this back to the p(z,SED)
+            // This is done to mimick as closely as possible the behavior of BPZ.
+            double tprob = 0.0;
+            for (uint_t iz : range(nzfit)) {
+                // Clip
+                if (pzc.safe[iz] < 1e-2*pmax) {
+                    pzc.safe[iz] = 0;
+                }
+
+                // Update the p(z,SED)
+                for (uint_t it : range(ntemplate)) {
+                    uint_t im = iz*ntemplate + it;
+
+                    if (pz.safe[iz] > 0.0) {
+                        pmodel.safe[im] *= pzc.safe[iz]/pz.safe[iz];
+                    }
+
+                    tprob += pmodel.safe[im];
+                }
+            }
+
+            pmodel /= tprob;
+
+            if (write_cache) {
+                zmeas_ml.safe[i] = zfit.safe[iml/ntemplate];
+                zmeas_ma.safe[i] = total(zfit*pzc)/total(pzc);
+            }
+
+            cache_bmodel.safe[i] = iml;
+            cache_pmodel += pmodel;
+        }
+
+        cache_pmodel /= nmc;
+
+        if (write_cache) {
+            fitter_cache.update_elements("pmodel",    cache_pmodel, fits::at(iter,_));
+            fitter_cache.update_elements("bmodel",    cache_bmodel, fits::at(iter,_));
+            fitter_cache.update_elements("zmeas_ml",  zmeas_ml,     fits::at(iter,_));
+            fitter_cache.update_elements("zmeas_ma",  zmeas_ma,     fits::at(iter,_));
+        }
+
+        compute_averages(id_type, tngal);
     }
 
     vec1d get_madau(double z, const vec1d& lam) const {
@@ -746,30 +708,6 @@ public :
         return hash(use_capak_library, apply_igm, zfit, bpz_seds, ninterp, gauss_convolve);
     }
 
-    void initialize_cache() override {
-        // Initialize arrays
-        fitter_cache.allocate_column<float>("pmag",          niter);
-        fitter_cache.allocate_column<uint_t>("bmodel",       niter, nmc);
-        fitter_cache.allocate_column<float>("pmodel",        niter, nmodel);
-        fitter_cache.allocate_column<float>("zmeas_ml",      niter, nmc);
-        fitter_cache.allocate_column<float>("zmeas_ma",      niter, nmc);
-        fitter_cache.allocate_column<float>("e1_bpz_ml",     niter);
-        fitter_cache.allocate_column<float>("e2_bpz_ml",     niter);
-        fitter_cache.allocate_column<float>("r2_bpz_ml",     niter);
-        fitter_cache.allocate_column<float>("e1_bpz_ma",     niter);
-        fitter_cache.allocate_column<float>("e2_bpz_ma",     niter);
-        fitter_cache.allocate_column<float>("r2_bpz_ma",     niter);
-        fitter_cache.allocate_column<float>("e1_bpz_ml_err", niter);
-        fitter_cache.allocate_column<float>("e2_bpz_ml_err", niter);
-        fitter_cache.allocate_column<float>("r2_bpz_ml_err", niter);
-        fitter_cache.allocate_column<float>("e1_bpz_ma_err", niter);
-        fitter_cache.allocate_column<float>("e2_bpz_ma_err", niter);
-        fitter_cache.allocate_column<float>("r2_bpz_ma_err", niter);
-
-        // Save meta data
-        fitter_cache.write_columns("z_grid", zfit, "sed_grid", bpz_seds);
-    }
-
     void initialize_redshift_slice(uint_t itz) override {
         double zf = uzf[itz];
 
@@ -805,23 +743,25 @@ public :
         m_ma.reset();
 
         // Create workspace
-        tpl_flux.resize(nmodel, nband);
-        wflux.resize(nband);
-        rflux.resize(nband);
-        weight.resize(nband);
-        wmodel.resize(nmodel, nband);
-        wmm.resize(nmodel);
         pmodel.resize(nmodel);
         prior.resize(nmodel);
         tt_prior.resize(nzfit*3);
         pz.resize(nzfit);
         pzc.resize(nzfit);
+        tpl_flux.resize(nmodel, nband);
+
+        wflux.resize(nband);
+        rflux.resize(nband);
+        weight.resize(nband);
+        wmodel.resize(nmodel, nband);
+        wmm.resize(nmodel);
+
+        cache_bmodel.resize(nmc);
+        cache_pmodel.resize(nmodel);
 
         if (write_cache) {
             zmeas_ml.resize(nmc);
             zmeas_ma.resize(nmc);
-            cache_bmodel.resize(nmc);
-            cache_pmodel.resize(nmodel);
         }
 
         if (!cache_available) {
@@ -857,6 +797,29 @@ public :
             }
             note("done.");
         }
+    }
+
+    void initialize_cache() override {
+        // Initialize arrays
+        fitter_cache.allocate_column<uint_t>("bmodel",       niter, nmc);
+        fitter_cache.allocate_column<float>("pmodel",        niter, nmodel);
+        fitter_cache.allocate_column<float>("zmeas_ml",      niter, nmc);
+        fitter_cache.allocate_column<float>("zmeas_ma",      niter, nmc);
+        fitter_cache.allocate_column<float>("e1_bpz_ml",     niter);
+        fitter_cache.allocate_column<float>("e2_bpz_ml",     niter);
+        fitter_cache.allocate_column<float>("r2_bpz_ml",     niter);
+        fitter_cache.allocate_column<float>("e1_bpz_ma",     niter);
+        fitter_cache.allocate_column<float>("e2_bpz_ma",     niter);
+        fitter_cache.allocate_column<float>("r2_bpz_ma",     niter);
+        fitter_cache.allocate_column<float>("e1_bpz_ml_err", niter);
+        fitter_cache.allocate_column<float>("e2_bpz_ml_err", niter);
+        fitter_cache.allocate_column<float>("r2_bpz_ml_err", niter);
+        fitter_cache.allocate_column<float>("e1_bpz_ma_err", niter);
+        fitter_cache.allocate_column<float>("e2_bpz_ma_err", niter);
+        fitter_cache.allocate_column<float>("r2_bpz_ma_err", niter);
+
+        // Save meta data
+        fitter_cache.write_columns("z_grid", zfit, "sed_grid", bpz_seds);
     }
 
     void finalize_redshift_slice(uint_t itz) override {

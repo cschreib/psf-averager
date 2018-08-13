@@ -82,8 +82,13 @@ public :
         mc = randomn(seed, nmc, nband);
     }
 
+    virtual void process_cached(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
+
     virtual void do_fit(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
+
+    virtual void set_priors(const vec1d& fdisk, const vec1d& fbulge) = 0;
 
     void on_generated(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
@@ -124,21 +129,33 @@ public :
             // Now generate mocks and fit them
             // -------------------------------
 
-            do_fit(id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
+            if (cache_available) {
+                // A cache is present and we can reuse it!
+                process_cached(id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
+            } else {
+                // No cached data, must recompute stuff
 
-            if (!cache_available && write_cache) {
-                fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
-                fitter_cache.update_elements("it",        id_type,      fits::at(iter));
-                fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
-                fitter_cache.update_elements("ibulge",    id_bulge,     fits::at(iter));
-                fitter_cache.update_elements("ibt",       id_bt,        fits::at(iter));
-                fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
-                fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
-                fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
-                fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
-                fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
-                fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
-                fitter_cache.open(cache_filename);
+                // Setup priors (if any)
+                set_priors(fdisk, fbulge);
+
+                // Do the fitting
+                do_fit(id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
+
+                // Save things in the cache
+                if (write_cache) {
+                    fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
+                    fitter_cache.update_elements("it",        id_type,      fits::at(iter));
+                    fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
+                    fitter_cache.update_elements("ibulge",    id_bulge,     fits::at(iter));
+                    fitter_cache.update_elements("ibt",       id_bt,        fits::at(iter));
+                    fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
+                    fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
+                    fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
+                    fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
+                    fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
+                    fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
+                    fitter_cache.open(cache_filename);
+                }
             }
 
             ++iter;
@@ -247,6 +264,9 @@ public :
             generate(zf, dz);
             note("done: ", niter);
 
+            // Initialize fitter
+            initialize_redshift_slice(itz);
+
             // Initialize cache
             std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
             std::string cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
@@ -305,9 +325,6 @@ public :
 
                 note("done.");
             }
-
-            // Initialize fitter
-            initialize_redshift_slice(iz);
 
             // Compute averages at that redshift
             iter = 0;
