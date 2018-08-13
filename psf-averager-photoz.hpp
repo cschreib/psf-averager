@@ -340,7 +340,7 @@ public :
             dndz_sf[itz] = nsf/dz;
 
             // Store results from fitter
-            finalize_redshift_slice(iz);
+            finalize_redshift_slice(itz);
         }
 
         // Average over N(z)
