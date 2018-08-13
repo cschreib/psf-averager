@@ -408,19 +408,13 @@ public :
                 uint_t titer = 0;
                 const uint_t titermax = 100000;
                 const double fit_tol = 1e-3;
-                // const double amp_min = 1e-15;
 
                 double ta, tb;
-                // vec1u ids = uindgen(ntemplate);
                 // vec2d tamp(1000, ntemplate);
-                // vec1u nids;
                 do {
                     ta = 0.0; tb = 0.0;
-                    // double maxcoef = 0.0;
-                    // for (uint_t it0 : ids) {
                     for (uint_t it0 : range(ntemplate)) {
                         double av = 0.0;
-                        // for (uint_t it1 : ids) {
                         for (uint_t it1 : range(ntemplate)) {
                             av += alpha.safe(it0,it1)*tcoefs.safe[it1];
                         }
@@ -428,24 +422,10 @@ public :
                         // Update coeff
                         double old = tcoefs.safe[it0];
                         tcoefs.safe[it0] *= beta.safe[it0]/av;
-                        // if (tcoefs.safe[it0] > maxcoef) {
-                        //     maxcoef = tcoefs.safe[it0];
-                        // }
 
                         ta += abs(tcoefs.safe[it0] - old);
                         tb += old;
                     }
-
-                    // Ignore templates with too low amplitude
-                    // for (uint_t it0 : ids) {
-                    //     // if (tcoefs.safe[it0]/maxcoef > amp_min) {
-                    //     if (tcoefs.safe[it0] > amp_min) {
-                    //         nids.push_back(it0);
-                    //     }
-                    // }
-
-                    // ids = std::move(nids);
-                    // nids.clear();
 
                     // if (titer < 1000) {
                     //     tamp(titer,_) = tcoefs;
