@@ -8,6 +8,7 @@ struct fitter_options {
     std::string template_error;
     double template_error_amp = 0.5;
     bool apply_igm = true;
+    bool use_noline_library = false;
     bool force_true_z = false;
 };
 
@@ -65,6 +66,7 @@ public :
     uint_t id_prior = npos;
     bool apply_igm = true;
     bool force_true_z = false;
+    bool use_noline_library = false;
 
 
     eazy_averager() : psf_averager("eazy") {}
@@ -73,6 +75,7 @@ public :
         nband = filters.size();
         apply_igm = opts.apply_igm;
         force_true_z = opts.force_true_z;
+        use_noline_library = opts.use_noline_library;
 
         prior_filter = opts.prior_filter;
         prior_file = opts.prior_file;
@@ -81,7 +84,12 @@ public :
         id_prior = where_first(prior_filter == bands) + 1;
 
         // Read EAzY PSF library
-        std::string eazy_filename = "EAzY/psfs-rebin2-cst.txt";
+        std::string eazy_filename;
+        if (use_noline_library) {
+            eazy_filename = psf_dir+"EAzY_noline/psfs-rebin2-cst.txt";
+        } else {
+            eazy_filename = psf_dir+"EAzY/psfs-rebin2-cst.txt";
+        }
         ascii::read_table(eazy_filename, eazy_ssed, eazy_zz, _, _, _, eazy_q11, eazy_q12, eazy_q22);
 
         // Read template error file
@@ -146,17 +154,31 @@ public :
 
         // List SEDs
         std::string sed_dir = "/home/cschreib/programming/eazy-photoz/templates/";
-        eazy_seds = sed_dir + vec1s{
-            "EAZY_v1.1_lines/eazy_v1.1_sed1.dat",
-            "EAZY_v1.1_lines/eazy_v1.1_sed2.dat",
-            "EAZY_v1.1_lines/eazy_v1.1_sed3.dat",
-            "EAZY_v1.1_lines/eazy_v1.1_sed4.dat",
-            "EAZY_v1.1_lines/eazy_v1.1_sed5.dat",
-            "EAZY_v1.1_lines/eazy_v1.1_sed6.dat",
-            "EAZY_v1.1_lines/eazy_v1.1_sed7.dat",
-            "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
-            "erb2010_highEW.dat"
-        };
+        if (use_noline_library) {
+            eazy_seds = sed_dir + vec1s{
+                "EAZY_v1.1_noline/eazy_v1.1_sed1.dat",
+                "EAZY_v1.1_noline/eazy_v1.1_sed2.dat",
+                "EAZY_v1.1_noline/eazy_v1.1_sed3.dat",
+                "EAZY_v1.1_noline/eazy_v1.1_sed4.dat",
+                "EAZY_v1.1_noline/eazy_v1.1_sed5.dat",
+                "EAZY_v1.1_noline/eazy_v1.1_sed6.dat",
+                "EAZY_v1.1_noline/eazy_v1.1_sed7.dat",
+                "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
+                "erb2010_highEW.dat"
+            };
+        } else {
+            eazy_seds = sed_dir + vec1s{
+                "EAZY_v1.1_lines/eazy_v1.1_sed1.dat",
+                "EAZY_v1.1_lines/eazy_v1.1_sed2.dat",
+                "EAZY_v1.1_lines/eazy_v1.1_sed3.dat",
+                "EAZY_v1.1_lines/eazy_v1.1_sed4.dat",
+                "EAZY_v1.1_lines/eazy_v1.1_sed5.dat",
+                "EAZY_v1.1_lines/eazy_v1.1_sed6.dat",
+                "EAZY_v1.1_lines/eazy_v1.1_sed7.dat",
+                "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
+                "erb2010_highEW.dat"
+            };
+        }
 
         ntemplate = eazy_seds.size();
 
@@ -391,13 +413,14 @@ public :
 
                     // Create beta vector
                     for (uint_t it : range(ntemplate)) {
-                        // Ignore negative fluxes
+                        // Ignore negative fluxes (NB: as in EAzY)
                         if (rflux.safe[l] > 0.0) {
                             beta.safe[it] += rflux.safe[l]*wm[it*nband+l];
                         }
                     }
                 }
 
+                // Initialize coefficients (NB: as in EAzY)
                 for (uint_t it : range(ntemplate)) {
                     tcoefs.safe[it] = (beta.safe[it] > 0.0 ? 1.0 : 0.0);
                 }
@@ -667,7 +690,7 @@ public :
     }
 
     std::string make_cache_hash() override {
-        return hash(prior_file, prior_filter, apply_igm, zfit, eazy_seds,
+        return hash(use_noline_library, prior_file, prior_filter, apply_igm, zfit, eazy_seds,
             tpl_error_y);
     }
 
@@ -887,6 +910,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
+    mopts.psf_dir = "../psf-library/";
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting

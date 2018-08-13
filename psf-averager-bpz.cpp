@@ -7,6 +7,7 @@ struct fitter_options {
     double zfit_max = 7.0;
     double zfit_dz = 0.01;
     bool use_capak_library = true;
+    bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
 };
@@ -60,6 +61,7 @@ public :
     uint_t id_prior = npos;
     uint_t ninterp = 0;
     bool use_capak_library = true;
+    bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
 
@@ -69,6 +71,7 @@ public :
     void configure_fitter(const fitter_options& opts) {
         nband = filters.size();
         use_capak_library = opts.use_capak_library;
+        use_noline_library = opts.use_noline_library;
         apply_igm = opts.apply_igm;
         force_true_z = opts.force_true_z;
 
@@ -85,9 +88,13 @@ public :
         // Read BPZ PSF library
         std::string bpz_filename;
         if (use_capak_library) {
-            bpz_filename = "BPZ_capak/psfs-rebin2-cst.txt";
+            if (use_noline_library) {
+                bpz_filename = psf_dir+"BPZ_capak_noline/psfs-rebin2-cst.txt";
+            } else {
+                bpz_filename = psf_dir+"BPZ_capak/psfs-rebin2-cst.txt";
+            }
         } else {
-            bpz_filename = "BPZ/psfs-rebin2-cst.txt";
+            bpz_filename = psf_dir+"BPZ/psfs-rebin2-cst.txt";
         }
 
         ascii::read_table(bpz_filename, bpz_ssed, bpz_zz, _, _, _, bpz_q11, bpz_q12, bpz_q22);
@@ -162,7 +169,11 @@ public :
         // Sort BPZ SEDs by color (red to blue)
         std::string sed_dir;
         if (use_capak_library) {
-            sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED_capak/";
+            if (use_noline_library) {
+                sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED_capak_noline/";
+            } else {
+                sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED_capak/";
+            }
         } else {
             sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED/";
         }
@@ -705,7 +716,8 @@ public :
     }
 
     std::string make_cache_hash() override {
-        return hash(use_capak_library, apply_igm, zfit, bpz_seds, ninterp, gauss_convolve);
+        return hash(use_capak_library, use_noline_library,
+            apply_igm, zfit, bpz_seds, ninterp, gauss_convolve);
     }
 
     void initialize_redshift_slice(uint_t itz) override {
@@ -864,6 +876,7 @@ int phypp_main(int argc, char* argv[]) {
     double zfit_dz = 0.01;
     std::string prior_filter = "sdss-i";
     bool use_capak_library = true;
+    bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
     bool no_noise = false;
@@ -873,8 +886,8 @@ int phypp_main(int argc, char* argv[]) {
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
-        seds_step, use_capak_library, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz,
-        force_true_z, no_noise
+        seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
+        use_cache, iz, force_true_z, no_noise
     ));
 
     bpz_averager pavg;
@@ -904,6 +917,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
+    mopts.psf_dir = "../psf-library/";
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting
@@ -913,6 +927,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.zfit_max = zfit_max;
     fopts.zfit_dz = zfit_dz;
     fopts.use_capak_library = use_capak_library;
+    fopts.use_noline_library = use_noline_library;
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
     pavg.configure_fitter(fopts);

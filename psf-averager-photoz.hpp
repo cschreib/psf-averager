@@ -8,6 +8,7 @@ struct mock_options {
     vec1f depths;
     double min_mag_err = 0.05;
     bool no_noise = false;
+    std::string psf_dir;
 };
 
 class psf_averager : public egg::generator {
@@ -43,6 +44,7 @@ public :
     uint_t nband = npos, nmc = npos;
     vec1f phot_err2;
     double rel_err = dnan;
+    std::string psf_dir;
 
     const std::string fitter;
 
@@ -61,6 +63,7 @@ public :
         nband = filters.size();
         dz = opts.dz;
         no_noise = opts.no_noise;
+        psf_dir = opts.psf_dir;
 
         // Square of photometric error (Gaussian additive component)
         phot_err2 = sqr(mag2uJy(opts.depths)/10.0);
@@ -165,7 +168,7 @@ public :
 
     bool read_egg_psfs(uint_t iz) {
         std::string zdir = "full_z"+to_string(iz)+"/";
-        std::string filename = zdir+"psfs-rebin2-cst.txt";
+        std::string filename = psf_dir+zdir+"psfs-rebin2-cst.txt";
         if (!file::exists(filename)) return false;
 
         // Read PSF library
@@ -350,7 +353,7 @@ public :
         m_tr = integrate(uzf, ztr, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
 
         // Save
-        to_fits("psf-mean-z"+to_string(iz)+"-bpz-tr.fits", m_tr,
+        to_fits("psf-mean-z"+to_string(iz)+"-tr.fits", m_tr,
             uzf, dndz, dndz_qu, dndz_sf, ztr
         );
 
