@@ -890,9 +890,9 @@ int phypp_main(int argc, char* argv[]) {
     // Setup survey
     egg::generator_options opts;
     opts.share_dir = "/home/cschreib/code/egg/share/";
-    opts.filter_db = "/home/cschreib/work_psf/scripts/psf-averager/filters.dat";
-    opts.filter_flambda = true;
-    opts.filter_photons = true;
+    opts.filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
+    opts.filter_flambda = true; // equivalent to FILTER_FORMAT=1
+    opts.filter_photons = true; // equivalent to FILTER_FORMAT=1
     opts.trim_filters = true;
     opts.selection_band = selection_band;
     opts.filters = filters;
@@ -910,7 +910,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
-    mopts.psf_dir = "../psf-library/";
+    mopts.psf_dir = "../../psf-library/";
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting
