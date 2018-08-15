@@ -583,6 +583,7 @@ public :
         cache_pc /= nmc;
 
         if (write_cache) {
+            fitter_cache.update_elements("best_chi2",  chi2_best,   fits::at(iter,_));
             fitter_cache.update_elements("best_coef",  cache_bestc, fits::at(iter,_,_));
             fitter_cache.update_elements("best_z",     cache_bestz, fits::at(iter,_));
             fitter_cache.update_elements("pz",         cache_pz,    fits::at(iter,_));
@@ -861,6 +862,7 @@ public :
     void initialize_cache() override {
         // Initialize arrays
         fitter_cache.allocate_column<float>("best_coef",      niter, nmc, ntemplate);
+        fitter_cache.allocate_column<float>("best_chi2",      niter, nmc);
         fitter_cache.allocate_column<uint_t>("best_z",        niter, nmc);
         fitter_cache.allocate_column<float>("pz",             niter, nzfit);
         fitter_cache.allocate_column<float>("pc",             niter, nmodel);

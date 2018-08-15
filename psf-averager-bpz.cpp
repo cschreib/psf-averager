@@ -10,6 +10,7 @@ struct fitter_options {
     bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
+    bool cache_save_pmodel = true;
 };
 
 class bpz_averager : public psf_averager {
@@ -44,6 +45,7 @@ public :
     vec1d prior;
     vec1d tt_prior;
     vec1d pz, pzc;
+    vec1d chi2_best;
 
     vec1d wflux, rflux, weight;
     vec2d wmodel;
@@ -64,6 +66,7 @@ public :
     bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
+    bool cache_save_pmodel = true;
 
 
     bpz_averager() : psf_averager("bpz") {}
@@ -78,6 +81,7 @@ public :
         phypp_check(is_any_of(opts.prior_filter, bands),
             "prior filter is not in the filter list ('", opts.prior_filter, "' not found')");
         id_prior = where_first(opts.prior_filter == bands) + 1;
+        cache_save_pmodel = opts.cache_save_pmodel;
 
         // Kernel used to convolve the P(z) to wash out too small fluctuations
         gauss_convolve = opts.gauss_convolve;
@@ -156,6 +160,9 @@ public :
             inplace_remove(bpz_q22,  idr);
 
             note("shrunk BPZ PSF library from ", old_size, " to ", bpz_ssed.size(), " (",
+                ubz.size(), " redshifts, ", bpz_ssed.size()/ubz.size(), " SEDs)");
+        } else {
+            note("read BPZ PSF library, ", bpz_ssed.size(), " elements (",
                 ubz.size(), " redshifts, ", bpz_ssed.size()/ubz.size(), " SEDs)");
         }
 
@@ -587,7 +594,7 @@ public :
 
             // Find best SED and z, and store chi2 to build p(z,SED)
             uint_t iml = npos;
-            double chi2_best = finf;
+            chi2_best.safe[i] = finf;
             for (uint_t im : range(nmodel)) {
                 double* wm = &wmodel.safe(im,0);
                 double* wf = &rflux.safe[0];
@@ -606,8 +613,8 @@ public :
 
                 pmodel.safe[im] = tchi2;
 
-                if (tchi2 < chi2_best) {
-                    chi2_best = tchi2;
+                if (tchi2 < chi2_best.safe[i]) {
+                    chi2_best.safe[i] = tchi2;
                     iml = im;
                 }
             }
@@ -617,7 +624,7 @@ public :
                 pz.safe[iz] = 0.0;
                 for (uint_t it : range(ntemplate)) {
                     uint_t im = iz*ntemplate + it;
-                    pmodel.safe[im] = exp(-0.5*(pmodel.safe[im] - chi2_best))*prior.safe[im];
+                    pmodel.safe[im] = exp(-0.5*(pmodel.safe[im] - chi2_best.safe[i]))*prior.safe[im];
                     pz.safe[iz] += pmodel.safe[im];
                 }
             }
@@ -674,8 +681,11 @@ public :
         cache_pmodel /= nmc;
 
         if (write_cache) {
-            fitter_cache.update_elements("pmodel",    cache_pmodel, fits::at(iter,_));
+            if (cache_save_pmodel) {
+                fitter_cache.update_elements("pmodel", cache_pmodel, fits::at(iter,_));
+            }
             fitter_cache.update_elements("bmodel",    cache_bmodel, fits::at(iter,_));
+            fitter_cache.update_elements("best_chi2", chi2_best,    fits::at(iter,_));
             fitter_cache.update_elements("zmeas_ml",  zmeas_ml,     fits::at(iter,_));
             fitter_cache.update_elements("zmeas_ma",  zmeas_ma,     fits::at(iter,_));
         }
@@ -726,8 +736,8 @@ public :
     }
 
     std::string make_cache_hash() override {
-        return hash(use_capak_library, use_noline_library,
-            apply_igm, zfit, bpz_seds, ninterp, gauss_convolve);
+        return hash(use_capak_library, use_egg_library, use_noline_library,
+            apply_igm, zfit, bpz_seds, ninterp, gauss_convolve, cache_save_pmodel);
     }
 
     void initialize_redshift_slice(uint_t itz) override {
@@ -771,6 +781,7 @@ public :
         pz.resize(nzfit);
         pzc.resize(nzfit);
         tpl_flux.resize(nmodel, nband);
+        chi2_best.resize(nmc);
 
         wflux.resize(nband);
         rflux.resize(nband);
@@ -824,7 +835,10 @@ public :
     void initialize_cache() override {
         // Initialize arrays
         fitter_cache.allocate_column<uint_t>("bmodel",       niter, nmc);
-        fitter_cache.allocate_column<float>("pmodel",        niter, nmodel);
+        if (cache_save_pmodel) {
+            fitter_cache.allocate_column<float>("pmodel",    niter, nmodel);
+        }
+        fitter_cache.allocate_column<float>("best_chi2",     niter, nmc);
         fitter_cache.allocate_column<float>("zmeas_ml",      niter, nmc);
         fitter_cache.allocate_column<float>("zmeas_ma",      niter, nmc);
         fitter_cache.allocate_column<float>("e1_bpz_ml",     niter);
@@ -892,12 +906,13 @@ int phypp_main(int argc, char* argv[]) {
     bool no_noise = false;
     bool write_cache = true;
     bool use_cache = true;
+    bool cache_save_pmodel = true;
     uint_t iz = 5;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
-        use_cache, iz, force_true_z, no_noise
+        use_cache, iz, force_true_z, no_noise, cache_save_pmodel
     ));
 
     bpz_averager pavg;
@@ -940,6 +955,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.use_noline_library = use_noline_library;
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
+    fopts.cache_save_pmodel = cache_save_pmodel;
     pavg.configure_fitter(fopts);
 
     // Average PSF metrics
