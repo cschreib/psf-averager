@@ -214,26 +214,19 @@ public :
 
         // Find correspondence with PSF library, which was sorted by file name...
         {
-            vec1s psf_seds = bpz_seds;
-            inplace_sort(psf_seds);
-
-            vec1u id_translate(psf_seds.size());
-            for (uint_t it : range(ntemplate)) {
-                id_translate[it] = where_first(psf_seds == bpz_seds[it]);
-            }
-
+            vec1u sid = sort(bpz_seds);
             vec1u ids(nmodel_base);
-            for (uint_t izf : range(nzfit_base))
-            for (uint_t it : range(ntemplate)) {
-                ids[izf*ntemplate + it] = where_first(
-                    bpz_zz == ubz[izf] && bpz_ssed == to_string(id_translate[it])
-                );
+            for (uint_t izf : range(nzfit_base)) {
+                uint_t i0 = izf*ntemplate;
+                for (uint_t it : range(ntemplate)) {
+                    ids.safe[i0+sid.safe[it]] = i0+it;
+                }
             }
 
             // Reshuffle
             // bpz_ssed is left alone, because we want it to remain sorted and map to
             // SED IDs in our new SED ordering, not the one of the PSF library...
-            bpz_zz  = bpz_zz[ids];
+            // bpz_zz is also left alone because the reshufling does not affect it.
             bpz_q11 = bpz_q11[ids];
             bpz_q12 = bpz_q12[ids];
             bpz_q22 = bpz_q22[ids];
@@ -244,6 +237,8 @@ public :
 
         // Interpolate the templates
         if (ninterp > 0) {
+            note("interpolating library...");
+
             std::string tmp_dir = "BPZ_interp/";
             file::mkdir(tmp_dir);
 
@@ -269,12 +264,27 @@ public :
             vec1u id0 = where(ossed == bpz_seds_sid.back());
             append(bpz_ssed, replicate(bpz_seds_sid.back(), nzfit_base));
             append(bpz_zz,   ubz);
-            append(bpz_q11,  oq11[id0]);
-            append(bpz_q12,  oq12[id0]);
-            append(bpz_q22,  oq22[id0]);
+            append(bpz_q11,  oq11.safe[id0]);
+            append(bpz_q12,  oq12.safe[id0]);
+            append(bpz_q22,  oq22.safe[id0]);
 
             uint_t ntemplate_old = ntemplate;
             ntemplate = 1;
+
+            // Cache VIS fluxes
+            vec2d vis(ntemplate_old, nzfit_base);
+            for (uint_t it : range(ntemplate_old)) {
+                vec1d rlam, rsed;
+                ascii::read_table(oseds[it], rlam, rsed);
+                rsed = cgs2uJy(rlam, rsed*1e-19);
+
+                for (uint_t iz : range(nzfit_base)) {
+                    vec1d tlam = rlam*(1e-4*(1.0 + zfit_base[iz]));
+                    vis.safe(it,iz) = sed2flux(
+                        selection_filter.lam, selection_filter.res, tlam, rsed
+                    );
+                }
+            }
 
             for (uint_t it : range(ntemplate_old-1)) {
                 // Read two adjacent SEDs
@@ -319,24 +329,24 @@ public :
                     for (uint_t iz : range(nzfit_base)) {
                         // We have to interpolate PSFs with a flux-weighted factor inside the VIS passband
                         vec1d tlam = clam*(1e-4*(1.0 + zfit_base[iz]));
-                        double f1 = sed2flux(selection_filter.lam, selection_filter.res, tlam, tsed1);
-                        double f2 = sed2flux(selection_filter.lam, selection_filter.res, tlam, tsed2);
+                        double f1 = (1.0-x)*vis.safe(it,iz);
+                        double f2 = x*vis.safe(it+1,iz);
                         double xf = f2/(f1 + f2);
 
-                        bpz_q11.push_back(oq11[id0[iz]]*(1.0-xf) + xf*oq11[id1[iz]]);
-                        bpz_q12.push_back(oq12[id0[iz]]*(1.0-xf) + xf*oq12[id1[iz]]);
-                        bpz_q22.push_back(oq22[id0[iz]]*(1.0-xf) + xf*oq22[id1[iz]]);
+                        bpz_q11.push_back(oq11.safe[id0.safe[iz]]*(1.0-xf) + xf*oq11.safe[id1.safe[iz]]);
+                        bpz_q12.push_back(oq12.safe[id0.safe[iz]]*(1.0-xf) + xf*oq12.safe[id1.safe[iz]]);
+                        bpz_q22.push_back(oq22.safe[id0.safe[iz]]*(1.0-xf) + xf*oq22.safe[id1.safe[iz]]);
                     }
                 }
 
-                // Added end SED
+                // Add last SED
                 bpz_seds.push_back(oseds[it+1]);
                 bpz_seds_sid.push_back(to_string(it+1));
                 append(bpz_ssed, replicate(bpz_seds_sid.back(), nzfit_base));
                 append(bpz_zz,   ubz);
-                append(bpz_q11,  oq11[id1]);
-                append(bpz_q12,  oq12[id1]);
-                append(bpz_q22,  oq22[id1]);
+                append(bpz_q11,  oq11.safe[id1]);
+                append(bpz_q12,  oq12.safe[id1]);
+                append(bpz_q22,  oq22.safe[id1]);
                 ++ntemplate;
 
                 std::swap(id0, id1);
