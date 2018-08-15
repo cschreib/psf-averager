@@ -7,9 +7,11 @@ struct fitter_options {
     double zfit_dz = 0.01;
     std::string template_error;
     double template_error_amp = 0.5;
+    double fit_tftol = 1e-4;
     bool apply_igm = true;
     bool use_noline_library = false;
     bool force_true_z = false;
+    bool limited_set = false;
 };
 
 class eazy_averager : public psf_averager {
@@ -67,6 +69,8 @@ public :
     bool apply_igm = true;
     bool force_true_z = false;
     bool use_noline_library = false;
+    bool limited_set = false;
+    double fit_tftol = 1e-4;
 
 
     eazy_averager() : psf_averager("eazy") {}
@@ -76,6 +80,8 @@ public :
         apply_igm = opts.apply_igm;
         force_true_z = opts.force_true_z;
         use_noline_library = opts.use_noline_library;
+        limited_set = opts.limited_set;
+        fit_tftol = opts.fit_tftol;
 
         prior_filter = opts.prior_filter;
         prior_file = opts.prior_file;
@@ -420,61 +426,143 @@ public :
                     }
                 }
 
-                // Initialize coefficients (NB: as in EAzY)
-                for (uint_t it : range(ntemplate)) {
-                    tcoefs.safe[it] = (beta.safe[it] > 0.0 ? 1.0 : 0.0);
-                }
+                double tchi2;
 
-                // n = now(); n1 += n - o; o = n;
+                if (limited_set) {
+                    tchi2 = finf;
 
-                // Compute non-negative decomposition using the Sha, Saul & Lee 2006 algorithm.
-                uint_t titer = 0;
-                const uint_t titermax = 100000;
-                const double fit_tol = 1e-3;
-
-                double ta, tb;
-                // vec2d tamp(1000, ntemplate);
-                do {
-                    ta = 0.0; tb = 0.0;
-                    for (uint_t it0 : range(ntemplate)) {
-                        double av = 0.0;
-                        for (uint_t it1 : range(ntemplate)) {
-                            av += alpha.safe(it0,it1)*tcoefs.safe[it1];
+                    // Find best combination using 1, 2, or 3 templates from the library.
+                    auto check_chi2 = [&](const vec1d& coefs) {
+                        double chi2 = 0.0;
+                        for (uint_t l : range(nband)) {
+                            double tm = 0.0;
+                            for (uint_t it : range(ntemplate)) {
+                                tm += coefs.safe[it]*wm[it*nband+l];
+                            }
+                            chi2 += sqr(wf[l] - tm);
                         }
 
-                        // Update coeff
-                        double old = tcoefs.safe[it0];
-                        tcoefs.safe[it0] *= beta.safe[it0]/av;
+                        if (chi2 < tchi2) {
+                            tchi2 = chi2;
+                            tcoefs = coefs;
+                        }
+                    };
 
-                        ta += abs(tcoefs.safe[it0] - old);
-                        tb += old;
+                    auto try_fit_single = [&](uint_t j) {
+                        double coef = beta.safe[j]/alpha.safe(j,j);
+
+                        if (coef >= 0) {
+                            vec1d coefs(ntemplate);
+                            coefs.safe[j] = coef;
+                            check_chi2(coefs);
+                        }
+                    };
+
+                    auto try_fit_two = [&](uint_t j1, uint_t j2) {
+                        double det = alpha.safe(j1,j1)*alpha.safe(j2,j2) - sqr(alpha.safe(j1,j2));
+
+                        double coef1 =  beta.safe[j1]*alpha.safe(j2,j2) - beta.safe[j2]*alpha.safe(j1,j2);
+                        double coef2 = -beta.safe[j1]*alpha.safe(j1,j2) + beta.safe[j2]*alpha.safe(j1,j1);
+
+                        coef1 /= det;
+                        coef2 /= det;
+
+                        if (coef1 >= 0 && coef2 >= 0) {
+                            vec1d coefs(ntemplate);
+                            coefs.safe[j1] = coef1;
+                            coefs.safe[j2] = coef2;
+                            check_chi2(coefs);
+                        }
+                    };
+
+                    auto try_fit_three = [&](uint_t j1, uint_t j2, uint_t j3) {
+                        double det1 = alpha.safe(j3,j3)*alpha.safe(j2,j2) - sqr(alpha.safe(j2,j3));
+                        double det2 = alpha.safe(j3,j3)*alpha.safe(j1,j2) - alpha.safe(j2,j3)*alpha.safe(j1,j3);
+                        double det3 = alpha.safe(j2,j3)*alpha.safe(j1,j2) - alpha.safe(j2,j2)*alpha.safe(j1,j3);
+                        double det  = alpha.safe(j1,j1)*det1 - alpha.safe(j1,j2)*det2 + alpha.safe(j1,j3)*det3;
+
+                        double det4 = alpha.safe(j3,j3)*alpha.safe(j1,j1) - sqr(alpha.safe(j1,j3));
+                        double det5 = alpha.safe(j2,j3)*alpha.safe(j1,j1) - alpha.safe(j1,j2)*alpha.safe(j1,j3);
+                        double det6 = alpha.safe(j2,j2)*alpha.safe(j1,j1) - sqr(alpha.safe(j1,j2));
+
+                        double coef1 =  beta.safe[j1]*det1 - beta.safe[j2]*det2 + beta.safe[j3]*det3;
+                        double coef2 = -beta.safe[j1]*det2 + beta.safe[j2]*det4 - beta.safe[j3]*det5;
+                        double coef3 =  beta.safe[j1]*det3 - beta.safe[j2]*det5 + beta.safe[j3]*det6;
+
+                        coef1 /= det;
+                        coef2 /= det;
+                        coef3 /= det;
+
+                        if (coef1 >= 0 && coef2 >= 0 && coef3 >= 0) {
+                            vec1d coefs(ntemplate);
+                            coefs.safe[j1] = coef1;
+                            coefs.safe[j2] = coef2;
+                            coefs.safe[j3] = coef3;
+                            check_chi2(coefs);
+                        }
+                    };
+
+                    for (uint_t i1 : range(ntemplate)) {
+                        try_fit_single(i1);
+
+                        for (uint_t i2 : range(i1+1, ntemplate)) {
+                            try_fit_two(i1, i2);
+
+                            for (uint_t i3 : range(i2+1, ntemplate)) {
+                                try_fit_three(i1, i2, i3);
+                            }
+                        }
                     }
+                } else {
+                    // Find best combination using all templates in the library.
+                    // Compute non-negative decomposition using the Sha, Saul & Lee 2006 algorithm.
+                    // It is iterative; may not converge and could be non-optimal, but it scales
+                    // better than a brute force approach when using large number of templates.
 
-                    // if (titer < 1000) {
-                    //     tamp(titer,_) = tcoefs;
-                    // }
-
-                    ++titer;
-                } while (ta/tb > fit_tol && titer < titermax);
-
-                // if (i == 0 && iz == 39) {
-                //     print("done");
-                //     fits::write_table("coefs.fits", ftable(tamp));
-                //     fits::write_table("tmpcat.fits", "flux", rflux/weight, "flux_err", sqrt(phot_err2), "bands", bands);
-                // }
-
-                // mtiter += titer;
-                // n = now(); n2 += n - o; o = n;
-
-                // Compute chi2
-                double tchi2 = 0.0;
-                for (uint_t l : range(nband)) {
-                    double tm = 0.0;
+                    // Initialize coefficients (NB: as in EAzY)
                     for (uint_t it : range(ntemplate)) {
-                        tm += tcoefs.safe[it]*wm[it*nband+l];
+                        tcoefs.safe[it] = (beta.safe[it] > 0.0 ? 1.0 : 0.0);
                     }
 
-                    tchi2 += sqr(wf[l] - tm);
+                    // n = now(); n1 += n - o; o = n;
+
+
+                    uint_t titer = 0;
+                    const uint_t titermax = 10000;
+
+                    double ta, tb;
+                    do {
+                        ta = 0.0; tb = 0.0;
+                        for (uint_t it0 : range(ntemplate)) {
+                            double av = 0.0;
+                            for (uint_t it1 : range(ntemplate)) {
+                                av += alpha.safe(it0,it1)*tcoefs.safe[it1];
+                            }
+
+                            // Update coeff
+                            double old = tcoefs.safe[it0];
+                            tcoefs.safe[it0] *= beta.safe[it0]/av;
+
+                            ta += abs(tcoefs.safe[it0] - old);
+                            tb += old;
+                        }
+
+                        ++titer;
+                    } while (ta/tb > fit_tftol && titer < titermax);
+
+                    // mtiter += titer;
+                    // n = now(); n2 += n - o; o = n;
+
+                    // Compute chi2
+                    tchi2 = 0.0;
+                    for (uint_t l : range(nband)) {
+                        double tm = 0.0;
+                        for (uint_t it : range(ntemplate)) {
+                            tm += tcoefs.safe[it]*wm[it*nband+l];
+                        }
+
+                        tchi2 += sqr(wf[l] - tm);
+                    }
                 }
 
                 // Store results
@@ -690,8 +778,8 @@ public :
     }
 
     std::string make_cache_hash() override {
-        return hash(use_noline_library, prior_file, prior_filter, apply_igm, zfit, eazy_seds,
-            tpl_error_y);
+        return hash(use_noline_library, limited_set, prior_file, prior_filter, apply_igm, zfit,
+            eazy_seds, tpl_error_y, fit_tftol);
     }
 
     void initialize_redshift_slice(uint_t itz) override {
@@ -873,6 +961,8 @@ int phypp_main(int argc, char* argv[]) {
     bool apply_igm = true;
     bool force_true_z = false;
     bool no_noise = false;
+    bool use_noline_library = false;
+    bool limited_set = false;
     bool write_cache = true;
     bool use_cache = true;
     uint_t iz = 5;
@@ -880,7 +970,7 @@ int phypp_main(int argc, char* argv[]) {
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
-        template_error_amp, force_true_z, no_noise
+        template_error_amp, force_true_z, no_noise, use_noline_library, limited_set
     ));
 
     eazy_averager pavg;
@@ -923,6 +1013,8 @@ int phypp_main(int argc, char* argv[]) {
     fopts.template_error_amp = template_error_amp;
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
+    fopts.use_noline_library = use_noline_library;
+    fopts.limited_set = limited_set;
     pavg.configure_fitter(fopts);
 
     // Average PSF metrics
