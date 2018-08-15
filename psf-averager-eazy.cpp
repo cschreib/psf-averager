@@ -382,7 +382,7 @@ public :
             // Create alpha matrix
             for (uint_t it0 : range(ntemplate))
             for (uint_t it1 : range(ntemplate)) {
-                if (it0 >= it1) {
+                if (it1 >= it0) {
                     double tmp = 0.0;
                     for (uint_t l : range(nband)) {
                         tmp += wm[it0*nband+l]*wm[it1*nband+l];
