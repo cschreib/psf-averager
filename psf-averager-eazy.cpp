@@ -356,15 +356,7 @@ public :
             chi2_best.safe[i] = finf;
         }
 
-        // double o = now();
-        // double n;
-
-        // double n0 = 0, n1 = 0, n2 = 0, n3 = 0;
-        // double mtiter = 0;
-
         for (uint_t iz : range(nzfit)) {
-            // o = now();
-
             cache_pz.safe[iz] = 0;
 
             // Create noise-free photometry
@@ -401,11 +393,7 @@ public :
                 }
             }
 
-            // n = now(); n0 += n - o; o = n;
-
             for (uint_t i : range(nmc)) {
-                // o = now();
-
                 // Create noisy photometry
                 for (uint_t it : range(ntemplate)) {
                     beta.safe[it] = 0.0;
@@ -524,9 +512,6 @@ public :
                         tcoefs.safe[it] = (beta.safe[it] > 0.0 ? 1.0 : 0.0);
                     }
 
-                    // n = now(); n1 += n - o; o = n;
-
-
                     uint_t titer = 0;
                     const uint_t titermax = 10000;
 
@@ -549,9 +534,6 @@ public :
 
                         ++titer;
                     } while (ta/tb > fit_tftol && titer < titermax);
-
-                    // mtiter += titer;
-                    // n = now(); n2 += n - o; o = n;
 
                     // Compute chi2
                     tchi2 = 0.0;
@@ -579,18 +561,8 @@ public :
                         cache_bestc.safe(i,it) = tcoefs.safe[it];
                     }
                 }
-
-                // n = now(); n3 += n - o; o = n;
             }
         }
-
-        // print("#");
-        // print(n0);
-        // print(n1);
-        // print(n2, " (", mtiter/(nmc*nzfit), ")");
-        // print(n3);
-
-        // o = now();
 
         // Step 2): compute p(z)
         for (uint_t i : range(nmc)) {
@@ -610,8 +582,6 @@ public :
         cache_pz /= nmc;
         cache_pc /= nmc;
 
-        // n = now(); print(n - o); o = n;
-
         if (write_cache) {
             fitter_cache.update_elements("best_coef",  cache_bestc, fits::at(iter,_,_));
             fitter_cache.update_elements("best_z",     cache_bestz, fits::at(iter,_));
@@ -619,11 +589,7 @@ public :
             fitter_cache.update_elements("pc",         cache_pc,    fits::at(iter,_));
         }
 
-        // n = now(); print(n - o); o = n;
-
         compute_averages(id_type, tngal);
-
-        // n = now(); print(n - o); o = n;
     }
 
     vec1d get_inoue(double z, const vec1d& lam) const {
