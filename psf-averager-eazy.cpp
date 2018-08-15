@@ -754,20 +754,20 @@ public :
         for (uint_t t : range(ntemplate)) {
             vec1d rlam, rsed;
             ascii::read_table(eazy_seds[t], rlam, rsed);
-            rsed *= 1e-19;
 
             for (uint_t izf : range(nzfit)) {
                 // Apply IGM absorption
                 vec1d olam = rlam*(1.0 + zfit[izf]);
-                vec1d osed;
+                vec1d osed = rsed;
                 if (apply_igm) {
-                    osed = get_inoue(zfit[izf], olam)*rsed;
-                } else {
-                    osed = rsed;
+                    osed *= get_inoue(zfit[izf], rlam);
                 }
 
                 osed = cgs2uJy(olam, osed);
                 olam *= 1e-4;
+
+                // Normalize all templates to unit flux at 5500A rest-frame (NB: as in EAzY)
+                osed /= interpolate(osed, rlam, 5500.0);
 
                 if (!cache_available) {
                     for (uint_t l : range(nband)) {
