@@ -308,24 +308,26 @@ where $\mathcal{A}$ is the sky area covered by our survey in steradians (this va
 
 \section{The PSF of a galaxy}
 
-Using the Euclid PSF toolkit, we generated PSFs for each of the 252 SEDs in the EGG library, redshifted on a fine grid with step $\Delta z = 0.001$. For reach of these PSFs, we computed the moments: $Q_{11}$, $Q_{12}$, and $Q_{22}$, which are essentially:
+Using the Euclid PSF toolkit, we generated PSFs for each of the 252 SEDs in the EGG library, redshifted on a fine grid with step $\Delta z = 0.001$. For reach of these PSFs, we computed the moments: $Q_{11}$, $Q_{12}$, and $Q_{22}$, which are given by:
 \begin{align}
-Q_{11} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,(x - \bar{x})^2}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
-Q_{12} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,(x - \bar{x})\,(y - \bar{y})}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
-Q_{22} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,(y - \bar{y})^2}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
+F_w &= \sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,, \\
+Q_{11} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,(x - \bar{x})^2}{F_w}\,, \\
+Q_{12} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,(x - \bar{x})\,(y - \bar{y})}{F_w}\,, \\
+Q_{22} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,(y - \bar{y})^2}{F_w}\,, \\
 \end{align}
 with
 \begin{align}
-\bar{x} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,x}{\sum_{x, y} {\rm PSF}(x,y)}\,, \\
-\bar{y} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,y}{\sum_{x, y} {\rm PSF}(x,y)}\,,
+\bar{x} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,x}{F_w}\,, \\
+\bar{y} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,y}{F_w}\,,
 \end{align}
-(where, in practice, the PSF is multiplied by a constant 2D Gaussian function of $\sigma=0.7"$, which attenuates the pixels further away from the center and stabilizes the moments, and where the process is iterated until $\bar{x}$ and $\bar{y}$ converge).
 
-When summing two PSFs, and assuming the centroids $(\bar{x},\bar{y})$ are identical, the moments of the summed PSF are the weighted averages of the moments of each PSF (where the weights are the relative flux in each PSF). This means that, for an SED $s$, we can actually write the moments of the corresponding PSF as an integral over wavelengths:
+The weighting function $W(x,y)$ is a constant 2D Gaussian function of $\sigma=0.7"$ centered on $(\bar{x}, \bar{y})$, which attenuates the pixels further away from the center and stabilizes the moments. Because this weighting function depends on $\bar{x}$ and $\bar{y}$, which themselves also depend on the weighting function, the process must be iterated until convergence of $\bar{x}$ and $\bar{y}$. The PSFs produced by the toolkit are such that $\sum_{x,y}{\rm PSF}(x,y) = 1$.
+
+From these equations, it follows that when summing two PSFs, and assuming the centroids $(\bar{x},\bar{y})$ are identical\footnote{This approximation induces an error on the ellipticities of order $10^{-8}$, far below the Euclid requirements.}, the moments of the summed PSF are the weighted averages of the moments of each PSF. The weights are the relative fluxes of each PSF (accounting, in particular, for the effect of the weighting function, which affects the total flux of the PSFs in a non-trivial way). This means that, for an SED $s$, we can actually write the moments of the corresponding PSF as an integral over wavelengths:
 \begin{align}
-Q_s = \frac{\int \dd\lambda\,f_s(\lambda)\,R(\lambda)\,Q(\lambda)}{\int \dd\lambda f_s(\lambda)\,R(\lambda)}\,,
+Q_s = \frac{\int \dd\lambda\,f_s(\lambda)\,R(\lambda)\,F_w(\lambda)\,Q(\lambda)}{\int \dd\lambda f_s(\lambda)\,R(\lambda)\,F_w(\lambda)}\,,
 \end{align}
-where $f_s$ is the flux density (per unit wavelength) of the SED, $R(\lambda)$ is the energy response of the instrument (a factor $\lambda$ times the quantum efficiency), and $Q(\lambda)$ is the moment of the monochromatic PSF at the wavelength $\lambda$.
+where $f_s$ is the flux density (per unit wavelength) of the SED, $R(\lambda)$ is the energy response of the instrument (a factor $\lambda$ times the quantum efficiency), $Q(\lambda)$ is the moment of the monochromatic PSF at the wavelength $\lambda$, and $F_w(\lambda)$ is the total flux of the PSF after applying the weighting function (as defined as above).
 
 For a galaxy composed of a disk and a bulge of SEDs $d$ and $b$ (respectively), the total flux density can be written:
 \begin{align}
@@ -335,10 +337,12 @@ Plugging this in the above integral, we can then express the moment correspondin
 \begin{align}
 Q_{\rm tot}(f_B, d, b) = \hat{f}_B(d,b)\,Q_b + (1 - \hat{f}_B(d,b))\,Q_d,
 \end{align}
-where $\hat{f}_B(d,b)$ is the \emph{flux-weighted} bulge-to-total ratio:
+where $\hat{f}_B(d,b)$ is some sort of \emph{flux-weighted} bulge-to-total ratio:
 \begin{align}
-\hat{f}_B(d,b) = \frac{\int \dd\lambda f_B\,f_b(\lambda)\,R(\lambda)}{\int \dd\lambda f_{tot}(\lambda, f_B, d, b)\,R(\lambda)}
+\hat{f}_B(d,b) = \frac{\int \dd\lambda f_B\,f_b(\lambda)\,R(\lambda)\,F_w(\lambda)}{\int \dd\lambda f_{tot}(\lambda, f_B, d, b)\,R(\lambda)\,F_w(\lambda)}
 \end{align}
+
+Omitting the $F_w$ term in the above equations can induce a bias approaching $10\%$ of the Euclid requirements.
 
 \section{The observed flux of a galaxy}
 
