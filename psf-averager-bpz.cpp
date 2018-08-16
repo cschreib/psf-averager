@@ -287,9 +287,13 @@ public :
 
                 for (uint_t iz : range(nzfit_base)) {
                     vec1d tlam = rlam*(1e-4*(1.0 + zfit_base[iz]));
-                    vis.safe(it,iz) = sed2flux(
-                        selection_filter.lam, selection_filter.res, tlam, rsed
-                    );
+                    double flx = sed2flux(psf_filter.lam, psf_filter.res, tlam, rsed);
+                    if (!is_finite(flx)) {
+                        // Falling out of the filter, assuming zero flux
+                        flx = 0.0;
+                    }
+
+                    vis.safe(it,iz) = flx;
                 }
             }
 

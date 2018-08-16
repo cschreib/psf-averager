@@ -26,10 +26,14 @@ public :
     vec1d egg_q11, egg_q12, egg_q22;
     vec2d eggz_q11, eggz_q12, eggz_q22;
 
+    // Monochromatic PSF library
+    vec1d mono_lam, mono_w;
+
     // Internal variables
     vec2d mc;
     vec1d uzf;
     vec1d dndz, dndz_qu, dndz_sf;
+    vec2d egg_fpsf;
 
     bool just_count = false;
     uint_t niter = 0;
@@ -45,6 +49,7 @@ public :
     vec1f phot_err2;
     double rel_err = dnan;
     std::string psf_dir;
+    filter_t psf_filter;
 
     const std::string fitter;
 
@@ -83,6 +88,34 @@ public :
         }
 
         mc = randomn(seed, nmc, nband);
+
+        // Read monochromatic PSF library
+        std::string filename = psf_dir+"mono.fits";
+        fits::read_table(filename, "lambda", mono_lam, "w", mono_w);
+
+        // Match it to the VIS filter
+        mono_w = interpolate(mono_w, mono_lam, selection_filter.lam);
+
+        // Ignore data outside of adopted bandpass (450-950)
+        mono_w[where(selection_filter.lam < 450 || selection_filter > 950)] = 0.0;
+
+        // Compute PSF-weighted VIS flux.
+        psf_filter = selection_filter;
+        psf_filter *= mono_w;
+        psf_filter.res /= integrate(psf_filter.lam, psf_filter.res);
+
+        egg_fpsf.resize(use.dims);
+        for (uint_t iuv : range(use.dims[0]))
+        for (uint_t ivj : range(use.dims[1])) {
+            if (!use.safe(iuv, ivj)) continue;
+
+            vec1d tlam = lam.safe(iuv, ivj, _);
+            vec1d tsed = sed.safe(iuv, ivj, _);
+
+            tsed = lsun2uJy(0.0, 1.0, tlam, tsed);
+
+            egg_fpsf.safe(iuv, ivj) = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
+        }
     }
 
     virtual void process_cached(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
@@ -110,7 +143,9 @@ public :
             // ------------------------
 
             // Compute flux-weighted B/T
-            const double fbtn = fbulge.safe[0]/ftot;
+            const double fpsf_bulge = egg_fpsf.safe[id_bulge]*bt.safe[id_bt];
+            const double fpsf_disk = egg_fpsf.safe[id_disk]*(1.0 - bt.safe[id_bt]);
+            const double fbtn = fpsf_bulge/(fpsf_disk + fpsf_bulge);
             const double fbti = 1.0 - fbtn;
 
             // Add up PSFs

@@ -835,7 +835,7 @@ public :
                     }
                 }
 
-                double flx = sed2flux(selection_filter.lam, selection_filter.res, olam, osed);
+                double flx = sed2flux(psf_filter.lam, psf_filter.res, olam, osed);
                 if (!is_finite(flx)) {
                     // Falling out of the filter, assuming zero flux
                     flx = 0.0;
