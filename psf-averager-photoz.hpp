@@ -33,7 +33,7 @@ public :
     vec2d mc;
     vec1d uzf;
     vec1d dndz, dndz_qu, dndz_sf;
-    vec2d egg_fpsf;
+    vec2d egg_fu, egg_fv, egg_fj, egg_fpsf;
 
     bool just_count = false;
     uint_t niter = 0;
@@ -99,11 +99,23 @@ public :
         // Ignore data outside of adopted bandpass (450-950)
         mono_w[where(selection_filter.lam < 450 || selection_filter > 950)] = 0.0;
 
-        // Compute PSF-weighted VIS flux.
+        // Compute rest-frame fluxes of EGG SEDs.
+        // Also compute PSF-weighted VIS flux.
+        filter_t rest_filter_u, rest_filter_v, rest_filter_j;
+        phypp_check(read_filter("maiz-U",  rest_filter_u),
+            "could not find rest-frame filter U, aborting");
+        phypp_check(read_filter("maiz-V",  rest_filter_v),
+            "could not find rest-frame filter V, aborting");
+        phypp_check(read_filter("2mass-J", rest_filter_j),
+            "could not find rest-frame filter J, aborting");
+
         psf_filter = selection_filter;
         psf_filter *= mono_w;
         psf_filter.res /= integrate(psf_filter.lam, psf_filter.res);
 
+        egg_fu.resize(use.dims);
+        egg_fv.resize(use.dims);
+        egg_fj.resize(use.dims);
         egg_fpsf.resize(use.dims);
         for (uint_t iuv : range(use.dims[0]))
         for (uint_t ivj : range(use.dims[1])) {
@@ -113,6 +125,10 @@ public :
             vec1d tsed = sed.safe(iuv, ivj, _);
 
             tsed = lsun2uJy(0.0, 1.0, tlam, tsed);
+
+            egg_fu.safe(iuv, ivj) = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
+            egg_fv.safe(iuv, ivj) = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
+            egg_fj.safe(iuv, ivj) = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
 
             egg_fpsf.safe(iuv, ivj) = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
         }
@@ -181,6 +197,15 @@ public :
 
                 // Save things in the cache
                 if (write_cache) {
+                    // Compute actual UVJ colors
+                    double mbt = bt.safe[id_bt];
+                    double mbti = 1.0 - mbt;
+                    double rfu = egg_fu.safe[id_disk]*mbti + mbt*egg_fu.safe[id_bulge];
+                    double rfv = egg_fv.safe[id_disk]*mbti + mbt*egg_fv.safe[id_bulge];
+                    double rfj = egg_fj.safe[id_disk]*mbti + mbt*egg_fj.safe[id_bulge];
+                    double rfuv = -2.5*log10(rfu/rfv);
+                    double rfvj = -2.5*log10(rfv/rfj);
+
                     fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
                     fitter_cache.update_elements("it",        id_type,      fits::at(iter));
                     fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
@@ -189,6 +214,8 @@ public :
                     fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
                     fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
                     fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
+                    fitter_cache.update_elements("uv",        rfuv,         fits::at(iter));
+                    fitter_cache.update_elements("vj",        rfvj,         fits::at(iter));
                     fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
                     fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
                     fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
@@ -339,6 +366,8 @@ public :
                 fitter_cache.allocate_column<uint_t>("ibt",          niter);
                 fitter_cache.allocate_column<float>("fbulge",        niter, nband+1);
                 fitter_cache.allocate_column<float>("fdisk",         niter, nband+1);
+                fitter_cache.allocate_column<float>("uv",            niter);
+                fitter_cache.allocate_column<float>("vj",            niter);
                 fitter_cache.allocate_column<float>("ngal",          niter);
                 fitter_cache.allocate_column<float>("e1_true",       niter);
                 fitter_cache.allocate_column<float>("e2_true",       niter);
