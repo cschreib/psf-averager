@@ -7,3 +7,6 @@ sdss-z=filter-db/eazy/COSMOS_SDSS_filter_z.txt.fits
 vista-Y=filter-db/eazy/VISTA_Y_system+atmos.dat.fits
 vista-J=filter-db/eazy/VISTA_J_system+atmos.dat.fits
 vista-H=filter-db/eazy/VISTA_H_system+atmos.dat.fits
+maiz-U=filter-db/eazy/REST_FRAME_maiz-apellaniz_Johnson_U.res.fits
+maiz-V=filter-db/eazy/REST_FRAME_maiz-apellaniz_Johnson_V.res.fits
+2mass-J=filter-db/eazy/2MASS_J.res.fits
