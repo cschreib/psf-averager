@@ -7,6 +7,7 @@ struct fitter_options {
     double zfit_max = 7.0;
     double zfit_dz = 0.01;
     bool use_capak_library = true;
+    bool use_egg_library = false;
     bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
@@ -63,6 +64,7 @@ public :
     uint_t id_prior = npos;
     uint_t ninterp = 0;
     bool use_capak_library = true;
+    bool use_egg_library = false;
     bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
@@ -71,16 +73,17 @@ public :
 
     bpz_averager() : psf_averager("bpz") {}
 
-    void configure_fitter(const fitter_options& opts) {
+    void configure_fitter(fitter_options opts) {
         nband = filters.size();
+
+        // Choice of template library
         use_capak_library = opts.use_capak_library;
         use_noline_library = opts.use_noline_library;
+        use_egg_library = opts.use_egg_library;
+
+        // Options on the fit
         apply_igm = opts.apply_igm;
         force_true_z = opts.force_true_z;
-
-        phypp_check(is_any_of(opts.prior_filter, bands),
-            "prior filter is not in the filter list ('", opts.prior_filter, "' not found')");
-        id_prior = where_first(opts.prior_filter == bands) + 1;
         cache_save_pmodel = opts.cache_save_pmodel;
 
         // Kernel used to convolve the P(z) to wash out too small fluctuations
@@ -89,19 +92,41 @@ public :
         // Interpolation of BPZ SEDs
         ninterp = opts.ninterp;
 
-        // Read BPZ PSF library
-        std::string bpz_filename;
-        if (use_capak_library) {
-            if (use_noline_library) {
-                bpz_filename = psf_dir+"BPZ_capak_noline/psfs-rebin2-cst.txt";
-            } else {
-                bpz_filename = psf_dir+"BPZ_capak/psfs-rebin2-cst.txt";
+        if (use_egg_library) {
+            use_capak_library = true;
+            use_noline_library = true;
+            ninterp = 0;
+            if (opts.zfit_max > 2.5) {
+                note("setting zfit_max=2.5 because EGG library does not go further");
+                opts.zfit_max = 2.5;
             }
-        } else {
-            bpz_filename = psf_dir+"BPZ/psfs-rebin2-cst.txt";
         }
 
-        ascii::read_table(bpz_filename, bpz_ssed, bpz_zz, _, _, _, bpz_q11, bpz_q12, bpz_q22);
+        phypp_check(is_any_of(opts.prior_filter, bands),
+            "prior filter is not in the filter list ('", opts.prior_filter, "' not found')");
+        id_prior = where_first(opts.prior_filter == bands) + 1;
+
+        // Read BPZ PSF library
+        std::string bpz_filename;
+        if (use_egg_library) {
+            bpz_filename = "EGG-rebin2-cst.fits";
+        } else {
+            if (use_capak_library) {
+                if (use_noline_library) {
+                    bpz_filename = "BPZ_capak_noline-rebin2-cst.fits";
+                } else {
+                    bpz_filename = "BPZ_capak-rebin2-cst.fits";
+                }
+            } else {
+                bpz_filename = "BPZ-rebin2-cst.fits";
+            }
+        }
+
+        bpz_filename = psf_dir+bpz_filename;
+
+        fits::read_table(bpz_filename,
+            "sed", bpz_ssed, "z", bpz_zz, "q11", bpz_q11, "q12", bpz_q12, "q22", bpz_q22
+        );
 
         // Resample BPZ library
         resample_library(opts);
@@ -173,22 +198,28 @@ public :
         dzfit = zfit_base[1] - zfit_base[0];
         note("redshift step: ", dzfit);
 
-        // Sort BPZ SEDs by color (red to blue)
+        // Locate SEDs
         std::string sed_dir;
-        if (use_capak_library) {
-            if (use_noline_library) {
-                sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED_capak_noline/";
-            } else {
-                sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED_capak/";
-            }
+        if (use_egg_library) {
+            sed_dir = "SED_egg/";
         } else {
-            sed_dir = "/home/cschreib/programming/bpz-1.99.3/SED/";
+            if (use_capak_library) {
+                if (use_noline_library) {
+                    sed_dir = "SED_capak_noline/";
+                } else {
+                    sed_dir = "SED_capak/";
+                }
+            } else {
+                sed_dir = "SED/";
+            }
         }
+
+        sed_dir = "/home/cschreib/programming/bpz-1.99.3/"+sed_dir;
 
         bpz_seds = file::list_files(sed_dir, "*.sed");
 
-        {
-            vec1d color(bpz_seds.size());
+        // Sort BPZ SEDs by color (red to blue)
+        vec1d color(bpz_seds.size()); {
             for (uint_t t : range(bpz_seds)) {
                 vec1d rlam, rsed;
                 ascii::read_table(sed_dir+bpz_seds[t], rlam, rsed);
@@ -205,9 +236,23 @@ public :
         }
 
         ntemplate = bpz_seds.size();
-        nelliptical = 1;
-        nspiral = 2;
+
+        // Split SEDs in classes
+        if (use_egg_library) {
+            // EGG SEDs, we do our best to find something that matches...
+            nelliptical = count(color <= 0.02);
+            nspiral = count(color > 0.02 && color <= 0.15);
+        } else {
+            // Standard set
+            // Capak: color = {0.0023, 0.036, 0.097, 0.21, 0.22, 0.41}
+            //                 Ell        Spirals       Irregulars
+            nelliptical = 1;
+            nspiral = 2;
+        }
+
         nirregular = ntemplate - nelliptical - nspiral;
+
+        note("SEDs: ", nelliptical, " ellipticals, ", nspiral, " spirals, ", nirregular, " irregulars");
 
         nmodel_base = ntemplate*nzfit_base;
 
@@ -240,7 +285,7 @@ public :
         }
 
         bpz_seds = sed_dir+bpz_seds;
-        bpz_seds_sid = to_string_vector(indgen(ntemplate));
+        bpz_seds_sid = bpz_ssed[_-(ntemplate-1)];
 
         // Interpolate the templates
         if (ninterp > 0) {
@@ -905,6 +950,7 @@ int phypp_main(int argc, char* argv[]) {
     std::string prior_filter = "sdss-i";
     bool use_capak_library = true;
     bool use_noline_library = false;
+    bool use_egg_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
     bool no_noise = false;
@@ -916,7 +962,7 @@ int phypp_main(int argc, char* argv[]) {
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
-        use_cache, iz, force_true_z, no_noise, cache_save_pmodel
+        use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel
     ));
 
     bpz_averager pavg;
@@ -957,6 +1003,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.zfit_dz = zfit_dz;
     fopts.use_capak_library = use_capak_library;
     fopts.use_noline_library = use_noline_library;
+    fopts.use_egg_library = use_egg_library;
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
     fopts.cache_save_pmodel = cache_save_pmodel;
