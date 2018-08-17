@@ -8,7 +8,7 @@ struct mock_options {
     vec1f depths;
     double min_mag_err = 0.05;
     bool no_noise = false;
-    std::string psf_dir;
+    std::string psf_file;
 };
 
 class psf_averager : public egg::generator {
@@ -44,7 +44,7 @@ public :
     uint_t nband = npos, nmc = npos;
     vec1f phot_err2;
     double rel_err = dnan;
-    std::string psf_dir;
+    std::string psf_file;
     filter_t psf_filter;
 
     bool single_pass = false;
@@ -67,7 +67,7 @@ public :
         nband = filters.size();
         dz = opts.dz;
         no_noise = opts.no_noise;
-        psf_dir = opts.psf_dir;
+        psf_file = opts.psf_file;
 
         // Square of photometric error (Gaussian additive component)
         phot_err2 = sqr(mag2uJy(opts.depths)/10.0);
@@ -92,9 +92,9 @@ public :
         psf_filter = selection_filter;
 
         // Read monochromatic PSF library
-        std::string filename = psf_dir+"mono.fits";
-        fits::read_table(filename, "lambda", mono_lam, "w", mono_w,
-            "q11", mono_q11, "q12", mono_q12, "q22", mono_q22);
+        fits::read_table(psf_file,
+            "lambda", mono_lam, "w", mono_w, "q11", mono_q11, "q12", mono_q12, "q22", mono_q22
+        );
 
         // Match it to the PSF filter
         mono_w   = interpolate(mono_w,   mono_lam, selection_filter.lam);
@@ -110,7 +110,7 @@ public :
         psf_filter.res *= mono_w;
         psf_filter.res /= integrate(psf_filter.lam, psf_filter.res);
 
-        // Compute rest-frame fluxes of EGG SEDs.
+        // Compute actual rest-frame colors of EGG SEDs.
         filter_t rest_filter_u, rest_filter_v, rest_filter_j;
         phypp_check(read_filter("maiz-U",  rest_filter_u),
             "could not find rest-frame filter U, aborting");

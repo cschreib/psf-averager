@@ -23,16 +23,14 @@ public :
     vec<1,metrics_set> zml, zma;
 
     // EAzY PSF library
-    vec1s eazy_seds, eazy_seds_sid;
-    vec1s eazy_ssed, eazy_zz;
-    vec1f eazy_z;
     vec1d eazy_q11, eazy_q12, eazy_q22;
+    vec1d eazy_fvis;
+
+    // Fit models
+    vec1s eazy_seds;
     vec1d zfit_base;
     uint_t nzfit_base = npos;
     uint_t nmodel_base = npos;
-
-    // Subsample of eazy PSF library
-    vec1d eazy_q11_fit, eazy_q12_fit, eazy_q22_fit;
     vec1d zfit;
     uint_t nmodel = npos;
     uint_t nzfit = npos;
@@ -43,8 +41,6 @@ public :
     vec2d prior_table;
     vec1d prior_mag;
     vec1d prior;
-
-    vec1d vis_flux;
 
     vec1d tpl_error_x, tpl_error_y;
 
@@ -89,75 +85,23 @@ public :
             "prior filter is not in the filter list ('", prior_filter, "' not found')");
         id_prior = where_first(prior_filter == bands) + 1;
 
-        // Read EAzY PSF library
-        std::string eazy_filename;
-        if (use_noline_library) {
-            eazy_filename = psf_dir+"EAzY_noline/psfs-rebin2-cst.txt";
-        } else {
-            eazy_filename = psf_dir+"EAzY/psfs-rebin2-cst.txt";
-        }
-        ascii::read_table(eazy_filename, eazy_ssed, eazy_zz, _, _, _, eazy_q11, eazy_q12, eazy_q22);
-
         // Read template error file
         ascii::read_table(opts.template_error, tpl_error_x, tpl_error_y);
         tpl_error_x /= 1e4;
         tpl_error_y *= opts.template_error_amp;
 
-        // Resample EAzY library
-        resample_library(opts);
+        // Setup redshift grid
+        nzfit_base = ceil(opts.zfit_max/opts.zfit_dz);
+        zfit_base = opts.zfit_dz*dindgen(nzfit_base);
+
+        // Setup EAzY library
+        make_sed_library();
+
+        // Read prior
+        read_prior();
     }
 
-    void resample_library(const fitter_options& opts) {
-        // Sort by z then SED
-        {
-            vec1u ids = sort(eazy_zz+eazy_ssed);
-            eazy_ssed  = eazy_ssed[ids];
-            eazy_zz    = eazy_zz[ids];
-            eazy_q11   = eazy_q11[ids];
-            eazy_q12   = eazy_q12[ids];
-            eazy_q22   = eazy_q22[ids];
-        }
-
-        // Reduce the size of the eazy z grid
-        vec1s ubz = unique_values_sorted(eazy_zz);
-        vec1f tz;
-        from_string(replace(ubz, "p", "."), tz);
-
-        if (!force_true_z) {
-            // We only do this if not fitting at the true redshift
-
-            uint_t skip_every = max(1, round(opts.zfit_dz/0.001));
-            vec1u idr;
-            uint_t k = 0;
-            vec1s oubz = ubz;
-            ubz.clear();
-            for (uint_t i : range(oubz)) {
-                if (k % skip_every != 0 || tz[i] > opts.zfit_max) {
-                    append(idr, where(eazy_zz == oubz[i]));
-                } else {
-                    ubz.push_back(oubz[i]);
-                }
-                ++k;
-            }
-
-            uint_t old_size = eazy_ssed.size();
-            inplace_remove(eazy_ssed, idr);
-            inplace_remove(eazy_zz,   idr);
-            inplace_remove(eazy_q11,  idr);
-            inplace_remove(eazy_q12,  idr);
-            inplace_remove(eazy_q22,  idr);
-
-            note("shrunk EAzY PSF library from ", old_size, " to ", eazy_ssed.size(), " (",
-                ubz.size(), " redshifts, ", eazy_ssed.size()/ubz.size(), " SEDs)");
-        }
-
-        // Find redshifts
-        from_string(replace(ubz, "p", "."), zfit_base);
-        nzfit_base = zfit_base.size();
-
-        dzfit = zfit_base[1] - zfit_base[0];
-        note("redshift step: ", dzfit);
-
+    void make_sed_library() {
         // List SEDs
         std::string sed_dir = "/home/cschreib/programming/eazy-photoz/templates/";
         if (use_noline_library) {
@@ -193,16 +137,9 @@ public :
         for (uint_t i : range(eazy_seds)) {
             note(" - ", i, ": ", eazy_seds[i]);
         }
+    }
 
-        phypp_check(nmodel_base == eazy_ssed.size(),
-            "mismatch between eazy SEDs in directory (", ntemplate, ") and PSF library (",
-            nzfit_base, "x", eazy_ssed.size()/nzfit_base, ")");
-
-        eazy_seds_sid = to_string_vector(indgen(ntemplate));
-
-        // Finalize stuff
-        from_string(replace(eazy_zz, "p", "."), eazy_z);
-
+    void read_prior() {
         // Read and re-sample prior
         {
             std::ifstream in(prior_file);
@@ -266,12 +203,12 @@ public :
             for (uint_t it : range(ntemplate)) {
                 uint_t im = iz*ntemplate + it;
 
-                double w = cache_bestc.safe(i,it)*vis_flux.safe[im];
+                double w = cache_bestc.safe(i,it)*eazy_fvis.safe[im];
                 wtot += w;
 
-                q11 += w*eazy_q11_fit.safe[im];
-                q12 += w*eazy_q12_fit.safe[im];
-                q22 += w*eazy_q22_fit.safe[im];
+                q11 += w*eazy_q11.safe[im];
+                q12 += w*eazy_q12.safe[im];
+                q22 += w*eazy_q22.safe[im];
             }
 
             metrics tm(q11/wtot, q12/wtot, q22/wtot);
@@ -296,12 +233,12 @@ public :
             for (uint_t it : range(ntemplate)) {
                 uint_t im = iz*ntemplate + it;
 
-                double w = cache_pc.safe(im)*vis_flux.safe[im];
+                double w = cache_pc.safe(im)*eazy_fvis.safe[im];
                 wtot += w;
 
-                q11 += w*eazy_q11_fit.safe[im];
-                q12 += w*eazy_q12_fit.safe[im];
-                q22 += w*eazy_q22_fit.safe[im];
+                q11 += w*eazy_q11.safe[im];
+                q12 += w*eazy_q12.safe[im];
+                q22 += w*eazy_q22.safe[im];
             }
 
             metrics tm(q11, q12, q22);
@@ -758,89 +695,76 @@ public :
             nzfit = 1;
             nmodel = ntemplate;
             prior_table = replicate(1.0, prior_mag.size(), 1);
-
-            eazy_q11_fit.resize(ntemplate);
-            eazy_q12_fit.resize(ntemplate);
-            eazy_q22_fit.resize(ntemplate);
-
-            // Interpolate eazy PSF library at the redshift
-            for (uint_t t : range(ntemplate)) {
-                vec1u ids = where(eazy_ssed == eazy_seds_sid[t]);
-                eazy_q11_fit[t] = interpolate_3spline(eazy_q11[ids], zfit_base, zf);
-                eazy_q12_fit[t] = interpolate_3spline(eazy_q12[ids], zfit_base, zf);
-                eazy_q22_fit[t] = interpolate_3spline(eazy_q22[ids], zfit_base, zf);
-            }
         } else {
             zfit = zfit_base;
             nzfit = nzfit_base;
             nmodel = nmodel_base;
             prior_table = prior_table_base;
-
-            eazy_q11_fit = eazy_q11;
-            eazy_q12_fit = eazy_q12;
-            eazy_q22_fit = eazy_q22;
         }
 
-        // Reset averages
-        m_ml.reset();
-        m_ma.reset();
+        // Pre-compute EAzY template fluxes and PSF moments
+        bool compute_moments = false;
+        if (force_true_z || eazy_q11.empty()) {
+            eazy_q11.resize(nmodel);
+            eazy_q12.resize(nmodel);
+            eazy_q22.resize(nmodel);
+            eazy_fvis.resize(nmodel);
+            compute_moments = true;
+        }
 
-        // Create workspace
-        prior.resize(nzfit);
-        pz.resize(nmc, nzfit);
-        chi2_best.resize(nmc);
-        tpz.resize(nzfit);
-        vis_flux.resize(nmodel);
-        tpl_flux.resize(nmodel, nband);
-        tpl_err.resize(nzfit, nband);
+        bool compute_fluxes = false;
+        if (!cache_available || tpl_flux.empty()) {
+            tpl_flux.resize(nmodel, nband);
+            compute_fluxes = true;
+        }
 
-        wflux.resize(nband);
-        rflux.resize(nband);
-        weight.resize(nband);
-        wmodel.resize(ntemplate, nband);
+        if (compute_moments || compute_fluxes) {
+            for (uint_t it : range(ntemplate)) {
+                vec1d rlam, rsed;
+                ascii::read_table(eazy_seds[it], rlam, rsed);
+                rsed *= 1e-19;
 
-        cache_bestz.resize(nmc);
-        cache_bestc.resize(nmc,ntemplate);
-        cache_pz.resize(nzfit);
-        cache_pc.resize(nmodel);
+                for (uint_t iz : range(nzfit)) {
+                    // Apply IGM absorption
+                    vec1d olam = rlam*(1.0 + zfit[iz]);
+                    vec1d osed = rsed;
+                    if (apply_igm) {
+                        osed *= get_inoue(zfit[iz], rlam);
+                    }
 
-        // Pre-compute EAzY template fluxes
-        note("pre-compute EAzY template fluxes...");
-        for (uint_t t : range(ntemplate)) {
-            vec1d rlam, rsed;
-            ascii::read_table(eazy_seds[t], rlam, rsed);
+                    osed = cgs2uJy(olam, osed);
+                    olam *= 1e-4;
 
-            for (uint_t izf : range(nzfit)) {
-                // Apply IGM absorption
-                vec1d olam = rlam*(1.0 + zfit[izf]);
-                vec1d osed = rsed;
-                if (apply_igm) {
-                    osed *= get_inoue(zfit[izf], rlam);
-                }
+                    // Normalize all templates to unit flux at 5500A rest-frame (NB: as in EAzY)
+                    osed /= interpolate(osed, rlam, 5500.0);
 
-                osed = cgs2uJy(olam, osed);
-                olam *= 1e-4;
-
-                // Normalize all templates to unit flux at 5500A rest-frame (NB: as in EAzY)
-                osed /= interpolate(osed, rlam, 5500.0);
-
-                if (!cache_available) {
-                    for (uint_t l : range(nband)) {
-                        double flx = sed2flux(filters[l].lam, filters[l].res, olam, osed);
-                        if (!is_finite(flx)) {
-                            // Falling out of the filter, assuming zero flux
-                            flx = 0.0;
+                    if (compute_fluxes) {
+                        // Compute model fluxes
+                        for (uint_t l : range(nband)) {
+                            double flx = sed2flux(filters[l].lam, filters[l].res, olam, osed);
+                            if (!is_finite(flx)) {
+                                // Falling out of the filter, assuming zero flux
+                                flx = 0.0;
+                            }
+                            tpl_flux.safe(iz*ntemplate+it,l) = flx;
                         }
-                        tpl_flux.safe(izf*ntemplate+t,l) = flx;
+                    }
+
+                    if (compute_moments) {
+                        // Compute PSF moments
+                        double fvis = sed2flux(psf_filter.lam, psf_filter.res, olam, osed);
+                        eazy_q11.safe[iz*ntemplate+it] = sed2flux(
+                            psf_filter.lam, psf_filter.res*mono_q11, olam, osed
+                        )/fvis;
+                        eazy_q12.safe[iz*ntemplate+it] = sed2flux(
+                            psf_filter.lam, psf_filter.res*mono_q12, olam, osed
+                        )/fvis;
+                        eazy_q22.safe[iz*ntemplate+it] = sed2flux(
+                            psf_filter.lam, psf_filter.res*mono_q22, olam, osed
+                        )/fvis;
+                        eazy_fvis.safe[iz*ntemplate+it] = fvis;
                     }
                 }
-
-                double flx = sed2flux(psf_filter.lam, psf_filter.res, olam, osed);
-                if (!is_finite(flx)) {
-                    // Falling out of the filter, assuming zero flux
-                    flx = 0.0;
-                }
-                vis_flux.safe[izf*ntemplate+t] = flx;
             }
         }
 
@@ -855,6 +779,27 @@ public :
                 }
             }
         }
+
+        // Reset averages
+        m_ml.reset();
+        m_ma.reset();
+
+        // Create workspace
+        prior.resize(nzfit);
+        pz.resize(nmc, nzfit);
+        chi2_best.resize(nmc);
+        tpz.resize(nzfit);
+        tpl_err.resize(nzfit, nband);
+
+        wflux.resize(nband);
+        rflux.resize(nband);
+        weight.resize(nband);
+        wmodel.resize(ntemplate, nband);
+
+        cache_bestz.resize(nmc);
+        cache_bestc.resize(nmc,ntemplate);
+        cache_pz.resize(nzfit);
+        cache_pc.resize(nmodel);
 
         note("done.");
     }
@@ -968,7 +913,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
-    mopts.psf_dir = "../../psf-library/";
+    mopts.psf_file = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting

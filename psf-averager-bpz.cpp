@@ -23,16 +23,13 @@ public :
     vec<1,metrics_set> zml, zma;
 
     // BPZ PSF library
-    vec1s bpz_seds, bpz_seds_sid;
-    vec1s bpz_ssed, bpz_zz;
-    vec1f bpz_z;
     vec1d bpz_q11, bpz_q12, bpz_q22;
+
+    // Fit models
+    vec1s bpz_seds;
     vec1d zfit_base;
     uint_t nzfit_base = npos;
     uint_t nmodel_base = npos;
-
-    // Subsample of BPZ PSF library
-    vec1d bpz_q11_fit, bpz_q12_fit, bpz_q22_fit;
     vec1d zfit;
     uint_t nmodel = npos;
     uint_t nzfit = npos;
@@ -70,7 +67,6 @@ public :
     bool force_true_z = false;
     bool cache_save_pmodel = true;
 
-
     bpz_averager() : psf_averager("bpz") {}
 
     void configure_fitter(fitter_options opts) {
@@ -96,40 +92,18 @@ public :
             use_capak_library = true;
             use_noline_library = true;
             ninterp = 0;
-            if (opts.zfit_max > 2.5) {
-                note("setting zfit_max=2.5 because EGG library does not go further");
-                opts.zfit_max = 2.5;
-            }
         }
 
         phypp_check(is_any_of(opts.prior_filter, bands),
             "prior filter is not in the filter list ('", opts.prior_filter, "' not found')");
         id_prior = where_first(opts.prior_filter == bands) + 1;
 
-        // Read BPZ PSF library
-        std::string bpz_filename;
-        if (use_egg_library) {
-            bpz_filename = "EGG-rebin2-cst.fits";
-        } else {
-            if (use_capak_library) {
-                if (use_noline_library) {
-                    bpz_filename = "BPZ_capak_noline-rebin2-cst.fits";
-                } else {
-                    bpz_filename = "BPZ_capak-rebin2-cst.fits";
-                }
-            } else {
-                bpz_filename = "BPZ-rebin2-cst.fits";
-            }
-        }
+        // Setup redshift grid
+        nzfit_base = ceil(opts.zfit_max/opts.zfit_dz);
+        zfit_base = opts.zfit_dz*dindgen(nzfit_base);
 
-        bpz_filename = psf_dir+bpz_filename;
-
-        fits::read_table(bpz_filename,
-            "sed", bpz_ssed, "z", bpz_zz, "q11", bpz_q11, "q12", bpz_q12, "q22", bpz_q22
-        );
-
-        // Resample BPZ library
-        resample_library(opts);
+        // Build (and resample) BPZ library
+        make_sed_library();
 
         // Make convolver kernel
         {
@@ -144,60 +118,7 @@ public :
         }
     }
 
-    void resample_library(const fitter_options& opts) {
-        // Sort by z then SED
-        {
-            vec1u ids = sort(bpz_zz+bpz_ssed);
-            bpz_ssed  = bpz_ssed[ids];
-            bpz_zz    = bpz_zz[ids];
-            bpz_q11   = bpz_q11[ids];
-            bpz_q12   = bpz_q12[ids];
-            bpz_q22   = bpz_q22[ids];
-        }
-
-        // Reduce the size of the BPZ z grid
-        vec1s ubz = unique_values_sorted(bpz_zz);
-        vec1f tz;
-        from_string(replace(ubz, "p", "."), tz);
-
-        if (!force_true_z) {
-            // We only do this if not fitting at the true redshift
-
-            uint_t skip_every = max(1, round(opts.zfit_dz/0.001));
-            vec1u idr;
-            uint_t k = 0;
-            vec1s oubz = ubz;
-            ubz.clear();
-            for (uint_t i : range(oubz)) {
-                if (k % skip_every != 0 || tz[i] > opts.zfit_max) {
-                    append(idr, where(bpz_zz == oubz[i]));
-                } else {
-                    ubz.push_back(oubz[i]);
-                }
-                ++k;
-            }
-
-            uint_t old_size = bpz_ssed.size();
-            inplace_remove(bpz_ssed, idr);
-            inplace_remove(bpz_zz,   idr);
-            inplace_remove(bpz_q11,  idr);
-            inplace_remove(bpz_q12,  idr);
-            inplace_remove(bpz_q22,  idr);
-
-            note("shrunk BPZ PSF library from ", old_size, " to ", bpz_ssed.size(), " (",
-                ubz.size(), " redshifts, ", bpz_ssed.size()/ubz.size(), " SEDs)");
-        } else {
-            note("read BPZ PSF library, ", bpz_ssed.size(), " elements (",
-                ubz.size(), " redshifts, ", bpz_ssed.size()/ubz.size(), " SEDs)");
-        }
-
-        // Find redshifts
-        from_string(replace(ubz, "p", "."), zfit_base);
-        nzfit_base = zfit_base.size();
-
-        dzfit = zfit_base[1] - zfit_base[0];
-        note("redshift step: ", dzfit);
-
+    void make_sed_library() {
         // Locate SEDs
         std::string sed_dir;
         if (use_egg_library) {
@@ -260,32 +181,7 @@ public :
             note(" - ", i, ": ", bpz_seds[i]);
         }
 
-        phypp_check(nmodel_base == bpz_ssed.size(),
-            "mismatch between BPZ SEDs in directory (", ntemplate, ") and PSF library (",
-            nzfit_base, "x", bpz_ssed.size()/nzfit_base, ")");
-
-        // Find correspondence with PSF library, which was sorted by file name...
-        {
-            vec1u sid = sort(bpz_seds);
-            vec1u ids(nmodel_base);
-            for (uint_t izf : range(nzfit_base)) {
-                uint_t i0 = izf*ntemplate;
-                for (uint_t it : range(ntemplate)) {
-                    ids.safe[i0+sid.safe[it]] = i0+it;
-                }
-            }
-
-            // Reshuffle
-            // bpz_ssed is left alone, because we want it to remain sorted and map to
-            // SED IDs in our new SED ordering, not the one of the PSF library...
-            // bpz_zz is also left alone because the reshufling does not affect it.
-            bpz_q11 = bpz_q11[ids];
-            bpz_q12 = bpz_q12[ids];
-            bpz_q22 = bpz_q22[ids];
-        }
-
         bpz_seds = sed_dir+bpz_seds;
-        bpz_seds_sid = bpz_ssed[_-(ntemplate-1)];
 
         // Interpolate the templates
         if (ninterp > 0) {
@@ -294,55 +190,14 @@ public :
             std::string tmp_dir = "BPZ_interp/";
             file::mkdir(tmp_dir);
 
-            // Save old PSF library
-            vec1s oseds = bpz_seds;
-            vec1s ossed = bpz_ssed;
-            vec1d oq11  = bpz_q11;
-            vec1d oq12  = bpz_q12;
-            vec1d oq22  = bpz_q22;
-
             // Clear library
+            vec1s oseds = bpz_seds;
             bpz_seds.clear();
-            bpz_seds_sid.clear();
-            bpz_ssed.clear();
-            bpz_zz.clear();
-            bpz_q11.clear();
-            bpz_q12.clear();
-            bpz_q22.clear();
 
             // Add first SED
             bpz_seds.push_back(oseds[0]);
-            bpz_seds_sid.push_back("0");
-            vec1u id0 = where(ossed == bpz_seds_sid.back());
-            append(bpz_ssed, replicate(bpz_seds_sid.back(), nzfit_base));
-            append(bpz_zz,   ubz);
-            append(bpz_q11,  oq11.safe[id0]);
-            append(bpz_q12,  oq12.safe[id0]);
-            append(bpz_q22,  oq22.safe[id0]);
 
-            uint_t ntemplate_old = ntemplate;
-            ntemplate = 1;
-
-            // Cache VIS fluxes
-            vec2d vis(ntemplate_old, nzfit_base);
-            for (uint_t it : range(ntemplate_old)) {
-                vec1d rlam, rsed;
-                ascii::read_table(oseds[it], rlam, rsed);
-                rsed = cgs2uJy(rlam, rsed*1e-19);
-
-                for (uint_t iz : range(nzfit_base)) {
-                    vec1d tlam = rlam*(1e-4*(1.0 + zfit_base[iz]));
-                    double flx = sed2flux(psf_filter.lam, psf_filter.res, tlam, rsed);
-                    if (!is_finite(flx)) {
-                        // Falling out of the filter, assuming zero flux
-                        flx = 0.0;
-                    }
-
-                    vis.safe(it,iz) = flx;
-                }
-            }
-
-            for (uint_t it : range(ntemplate_old-1)) {
+            for (uint_t it : range(ntemplate-1)) {
                 // Read two adjacent SEDs
                 vec1d rlam1, rsed1, rlam2, rsed2;
                 ascii::read_table(oseds[it],   rlam1, rsed1);
@@ -360,69 +215,34 @@ public :
                 rsed1 = interpolate(rsed1, rlam1, clam);
                 rsed2 = interpolate(rsed2, rlam2, clam);
 
-                vec1u id1 = where(ossed == to_string(it+1));
-
-                // Interpolate
                 for (uint_t ii : range(ninterp)) {
+                    // Interpolate
                     double x = (ii+1.0)/(ninterp+1.0);
                     vec1d tsed1 = (1.0-x)*rsed1;
                     vec1d tsed2 = x*rsed2;
                     vec1d rsed = tsed1 + tsed2;
                     rsed = uJy2cgs(clam, rsed)*1e19;
 
+                    // Save to disk
                     std::string fname = file::remove_extension(file::get_basename(oseds[it]))
                         +"_"+to_string(ii)+"_"+to_string(ninterp)+".sed";
                     ascii::write_table(tmp_dir+fname, clam, rsed);
 
-                    // Insert SED in PSF library
+                    // Insert SED in library
                     bpz_seds.push_back(tmp_dir+fname);
-                    std::string istr = align_right(to_string(ii), floor(log10(ninterp)), '0');
-                    bpz_seds_sid.push_back(to_string(it)+"."+istr);
-                    append(bpz_ssed, replicate(bpz_seds_sid.back(), nzfit_base));
-                    append(bpz_zz,   ubz);
-                    ++ntemplate;
-
-                    for (uint_t iz : range(nzfit_base)) {
-                        // We have to interpolate PSFs with a flux-weighted factor inside the VIS passband
-                        vec1d tlam = clam*(1e-4*(1.0 + zfit_base[iz]));
-                        double f1 = (1.0-x)*vis.safe(it,iz);
-                        double f2 = x*vis.safe(it+1,iz);
-                        double xf = f2/(f1 + f2);
-
-                        bpz_q11.push_back(oq11.safe[id0.safe[iz]]*(1.0-xf) + xf*oq11.safe[id1.safe[iz]]);
-                        bpz_q12.push_back(oq12.safe[id0.safe[iz]]*(1.0-xf) + xf*oq12.safe[id1.safe[iz]]);
-                        bpz_q22.push_back(oq22.safe[id0.safe[iz]]*(1.0-xf) + xf*oq22.safe[id1.safe[iz]]);
-                    }
                 }
 
-                // Add last SED
+                // Add next SED
                 bpz_seds.push_back(oseds[it+1]);
-                bpz_seds_sid.push_back(to_string(it+1));
-                append(bpz_ssed, replicate(bpz_seds_sid.back(), nzfit_base));
-                append(bpz_zz,   ubz);
-                append(bpz_q11,  oq11.safe[id1]);
-                append(bpz_q12,  oq12.safe[id1]);
-                append(bpz_q22,  oq22.safe[id1]);
-                ++ntemplate;
-
-                std::swap(id0, id1);
             }
 
-            // Re-sort library, presently sorted by SED and z, into z and SED.
-            vec1u ids = sort(bpz_zz+bpz_ssed);
-            bpz_ssed  = bpz_ssed[ids];
-            bpz_zz    = bpz_zz[ids];
-            bpz_q11   = bpz_q11[ids];
-            bpz_q12   = bpz_q12[ids];
-            bpz_q22   = bpz_q22[ids];
+            uint_t ntemplate_old = ntemplate;
+            ntemplate = bpz_seds.size();
 
             nmodel_base = nzfit_base*ntemplate;
 
-            note("expanded PSF library from ", ntemplate_old, " to ", ntemplate, " SEDs");
+            note("expanded BPZ template library from ", ntemplate_old, " to ", ntemplate, " SEDs");
         }
-
-        // Finalize stuff
-        from_string(replace(bpz_zz, "p", "."), bpz_z);
     }
 
     void set_priors(const vec1d& fdisk, const vec1d& fbulge) override {
@@ -559,7 +379,7 @@ public :
         metrics ml2;
         for (uint_t i : range(nmc)) {
             uint_t iml = cache_bmodel.safe(i);
-            metrics tm(bpz_q11_fit.safe[iml], bpz_q12_fit.safe[iml], bpz_q22_fit.safe[iml]);
+            metrics tm(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
             ml  += tm;
             ml2 += sqr(tm);
         }
@@ -575,7 +395,7 @@ public :
         metrics ma;
         metrics ma2;
         for (uint_t im : range(nmodel)) {
-            metrics tm(bpz_q11_fit.safe[im], bpz_q12_fit.safe[im], bpz_q22_fit.safe[im]);
+            metrics tm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
             ma  += cache_pmodel.safe[im]*tm;
             ma2 += cache_pmodel.safe[im]*sqr(tm);
         }
@@ -584,12 +404,12 @@ public :
         m_ma.add(id_type, tngal*ma);
 
         if (write_cache) {
-            fitter_cache.update_elements("e1_bpz_ml", ml.e1,      fits::at(iter));
-            fitter_cache.update_elements("e2_bpz_ml", ml.e2,      fits::at(iter));
-            fitter_cache.update_elements("r2_bpz_ml", ml.r2,      fits::at(iter));
-            fitter_cache.update_elements("e1_bpz_ma", ma.e1,      fits::at(iter));
-            fitter_cache.update_elements("e2_bpz_ma", ma.e2,      fits::at(iter));
-            fitter_cache.update_elements("r2_bpz_ma", ma.r2,      fits::at(iter));
+            fitter_cache.update_elements("e1_bpz_ml",     ml.e1,  fits::at(iter));
+            fitter_cache.update_elements("e2_bpz_ml",     ml.e2,  fits::at(iter));
+            fitter_cache.update_elements("r2_bpz_ml",     ml.r2,  fits::at(iter));
+            fitter_cache.update_elements("e1_bpz_ma",     ma.e1,  fits::at(iter));
+            fitter_cache.update_elements("e2_bpz_ma",     ma.e2,  fits::at(iter));
+            fitter_cache.update_elements("r2_bpz_ma",     ma.r2,  fits::at(iter));
             fitter_cache.update_elements("e1_bpz_ml_err", ml2.e1, fits::at(iter));
             fitter_cache.update_elements("e2_bpz_ml_err", ml2.e2, fits::at(iter));
             fitter_cache.update_elements("r2_bpz_ml_err", ml2.r2, fits::at(iter));
@@ -797,26 +617,71 @@ public :
             zfit = {zf};
             nzfit = 1;
             nmodel = ntemplate;
-
-            bpz_q11_fit.resize(ntemplate);
-            bpz_q12_fit.resize(ntemplate);
-            bpz_q22_fit.resize(ntemplate);
-
-            // Interpolate BPZ PSF library at the redshift
-            for (uint_t t : range(ntemplate)) {
-                vec1u ids = where(bpz_ssed == bpz_seds_sid[t]);
-                bpz_q11_fit[t] = interpolate_3spline(bpz_q11[ids], zfit_base, zf);
-                bpz_q12_fit[t] = interpolate_3spline(bpz_q12[ids], zfit_base, zf);
-                bpz_q22_fit[t] = interpolate_3spline(bpz_q22[ids], zfit_base, zf);
-            }
         } else {
             zfit = zfit_base;
             nzfit = nzfit_base;
             nmodel = nmodel_base;
+        }
 
-            bpz_q11_fit = bpz_q11;
-            bpz_q12_fit = bpz_q12;
-            bpz_q22_fit = bpz_q22;
+        // Pre-compute BPZ template fluxes and PSF moments
+        bool compute_moments = false;
+        if (force_true_z || bpz_q11.empty()) {
+            bpz_q11.resize(nmodel);
+            bpz_q12.resize(nmodel);
+            bpz_q22.resize(nmodel);
+            compute_moments = true;
+        }
+
+        bool compute_fluxes = false;
+        if (!cache_available || tpl_flux.empty()) {
+            tpl_flux.resize(nmodel, nband);
+            compute_fluxes = true;
+        }
+
+        if (compute_moments || compute_fluxes) {
+            for (uint_t it : range(ntemplate)) {
+                vec1d rlam, rsed;
+                ascii::read_table(bpz_seds[it], rlam, rsed);
+                rsed *= 1e-19;
+
+                for (uint_t iz : range(nzfit)) {
+                    // Apply IGM absorption
+                    vec1d olam = rlam*(1.0 + zfit[iz]);
+                    vec1d osed = rsed;
+                    if (apply_igm) {
+                        osed *= get_madau(zfit[iz], olam);
+                    }
+
+                    osed = cgs2uJy(olam, osed);
+                    olam *= 1e-4;
+
+                    if (compute_fluxes) {
+                        // Compute model fluxes
+                        for (uint_t l : range(nband)) {
+                            double flx = sed2flux(filters[l].lam, filters[l].res, olam, osed);
+                            if (!is_finite(flx)) {
+                                // Falling out of the filter, assuming zero flux
+                                flx = 0.0;
+                            }
+                            tpl_flux.safe(iz*ntemplate+it,l) = flx;
+                        }
+                    }
+
+                    if (compute_moments) {
+                        // Compute PSF moments
+                        double fvis = sed2flux(psf_filter.lam, psf_filter.res, olam, osed);
+                        bpz_q11.safe[iz*ntemplate+it] = sed2flux(
+                            psf_filter.lam, psf_filter.res*mono_q11, olam, osed
+                        )/fvis;
+                        bpz_q12.safe[iz*ntemplate+it] = sed2flux(
+                            psf_filter.lam, psf_filter.res*mono_q12, olam, osed
+                        )/fvis;
+                        bpz_q22.safe[iz*ntemplate+it] = sed2flux(
+                            psf_filter.lam, psf_filter.res*mono_q22, olam, osed
+                        )/fvis;
+                    }
+                }
+            }
         }
 
         // Reset averages
@@ -829,7 +694,6 @@ public :
         tt_prior.resize(nzfit*3);
         pz.resize(nzfit);
         pzc.resize(nzfit);
-        tpl_flux.resize(nmodel, nband);
         chi2_best.resize(nmc);
 
         wflux.resize(nband);
@@ -844,40 +708,6 @@ public :
         if (write_cache) {
             zmeas_ml.resize(nmc);
             zmeas_ma.resize(nmc);
-        }
-
-        if (!cache_available) {
-            // Pre-compute BPZ template fluxes
-            note("pre-compute BPZ template fluxes...");
-            for (uint_t t : range(ntemplate)) {
-                vec1d rlam, rsed;
-                ascii::read_table(bpz_seds[t], rlam, rsed);
-                rsed *= 1e-19;
-
-                for (uint_t izf : range(nzfit)) {
-                    // Apply IGM absorption
-                    vec1d olam = rlam*(1.0 + zfit[izf]);
-                    vec1d osed;
-                    if (apply_igm) {
-                        osed = get_madau(zfit[izf], olam)*rsed;
-                    } else {
-                        osed = rsed;
-                    }
-
-                    osed = cgs2uJy(olam, osed);
-                    olam *= 1e-4;
-
-                    for (uint_t l : range(nband)) {
-                        double flx = sed2flux(filters[l].lam, filters[l].res, olam, osed);
-                        if (!is_finite(flx)) {
-                            // Falling out of the filter, assuming zero flux
-                            flx = 0.0;
-                        }
-                        tpl_flux.safe(izf*ntemplate+t,l) = flx;
-                    }
-                }
-            }
-            note("done.");
         }
     }
 
@@ -992,7 +822,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
-    mopts.psf_dir = "../../psf-library/";
+    mopts.psf_file = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting

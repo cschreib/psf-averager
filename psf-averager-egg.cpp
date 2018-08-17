@@ -55,7 +55,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = 0.0;
     mopts.dz = dz;
     mopts.no_noise = true;
-    mopts.psf_dir = "/home/cschreib/work_psf/psf-library/";
+    mopts.psf_file = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
     pavg.configure_mock(mopts);
 
     if (!pavg.average_redshift_bin(iz)) return 1;
