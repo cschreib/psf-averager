@@ -19,21 +19,17 @@ public :
     // Averages
     metrics_set m_tr; // EGG (truth)
 
-    // EGG PSF library
-    vec1s egg_ssed, egg_zz;
-    vec1s egg_sz;
-    vec1d egg_z;
-    vec1d egg_q11, egg_q12, egg_q22;
-    vec2d eggz_q11, eggz_q12, eggz_q22;
-
     // Monochromatic PSF library
-    vec1d mono_lam, mono_w;
+    vec1d mono_lam, mono_q11, mono_q12, mono_q22, mono_w;
+
+    // EGG PSF library
+    vec2d egg_q11, egg_q12, egg_q22;
+    vec2d egg_fu, egg_fv, egg_fj, egg_fvis;
 
     // Internal variables
     vec2d mc;
     vec1d uzf;
     vec1d dndz, dndz_qu, dndz_sf;
-    vec2d egg_fu, egg_fv, egg_fj, egg_fpsf;
 
     bool just_count = false;
     uint_t niter = 0;
@@ -92,18 +88,29 @@ public :
 
         mc = randomn(seed, nmc, nband);
 
+        // Set PSF filter
+        psf_filter = selection_filter;
+
         // Read monochromatic PSF library
         std::string filename = psf_dir+"mono.fits";
-        fits::read_table(filename, "lambda", mono_lam, "w", mono_w);
+        fits::read_table(filename, "lambda", mono_lam, "w", mono_w,
+            "q11", mono_q11, "q12", mono_q12, "q22", mono_q22);
 
-        // Match it to the VIS filter
-        mono_w = interpolate(mono_w, mono_lam, selection_filter.lam);
+        // Match it to the PSF filter
+        mono_w   = interpolate(mono_w,   mono_lam, selection_filter.lam);
+        mono_q11 = interpolate(mono_q11, mono_lam, selection_filter.lam);
+        mono_q12 = interpolate(mono_q12, mono_lam, selection_filter.lam);
+        mono_q22 = interpolate(mono_q22, mono_lam, selection_filter.lam);
+        mono_lam = selection_filter.lam;
 
         // Ignore data outside of adopted bandpass (450-950)
-        mono_w[where(selection_filter.lam < 450 || selection_filter > 950)] = 0.0;
+        mono_w[where(mono_lam < 0.450 || mono_lam > 0.950)] = 0.0;
+
+        // Include PSF weighting flux loss in PSF filter response
+        psf_filter.res *= mono_w;
+        psf_filter.res /= integrate(psf_filter.lam, psf_filter.res);
 
         // Compute rest-frame fluxes of EGG SEDs.
-        // Also compute PSF-weighted VIS flux.
         filter_t rest_filter_u, rest_filter_v, rest_filter_j;
         phypp_check(read_filter("maiz-U",  rest_filter_u),
             "could not find rest-frame filter U, aborting");
@@ -112,28 +119,21 @@ public :
         phypp_check(read_filter("2mass-J", rest_filter_j),
             "could not find rest-frame filter J, aborting");
 
-        psf_filter = selection_filter;
-        psf_filter *= mono_w;
-        psf_filter.res /= integrate(psf_filter.lam, psf_filter.res);
-
         egg_fu.resize(use.dims);
         egg_fv.resize(use.dims);
         egg_fj.resize(use.dims);
-        egg_fpsf.resize(use.dims);
         for (uint_t iuv : range(use.dims[0]))
         for (uint_t ivj : range(use.dims[1])) {
-            if (!use.safe(iuv, ivj)) continue;
+            if (!use(iuv, ivj)) continue;
 
-            vec1d tlam = lam.safe(iuv, ivj, _);
-            vec1d tsed = sed.safe(iuv, ivj, _);
+            vec1d tlam = lam(iuv,ivj,_);
+            vec1d tsed = sed(iuv,ivj,_);
 
             tsed = lsun2uJy(0.0, 1.0, tlam, tsed);
 
-            egg_fu.safe(iuv, ivj) = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
-            egg_fv.safe(iuv, ivj) = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
-            egg_fj.safe(iuv, ivj) = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
-
-            egg_fpsf.safe(iuv, ivj) = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
+            egg_fu(iuv, ivj) = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
+            egg_fv(iuv, ivj) = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
+            egg_fj(iuv, ivj) = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
         }
     }
 
@@ -162,16 +162,16 @@ public :
             // ------------------------
 
             // Compute flux-weighted B/T
-            const double fpsf_bulge = egg_fpsf.safe[id_bulge]*bt.safe[id_bt];
-            const double fpsf_disk = egg_fpsf.safe[id_disk]*(1.0 - bt.safe[id_bt]);
+            const double fpsf_bulge = egg_fvis.safe[id_bulge]*bt.safe[id_bt];
+            const double fpsf_disk = egg_fvis.safe[id_disk]*(1.0 - bt.safe[id_bt]);
             const double fbtn = fpsf_bulge/(fpsf_disk + fpsf_bulge);
             const double fbti = 1.0 - fbtn;
 
             // Add up PSFs
             metrics tr(
-                eggz_q11.safe[id_disk]*fbti + eggz_q11.safe[id_bulge]*fbtn,
-                eggz_q12.safe[id_disk]*fbti + eggz_q12.safe[id_bulge]*fbtn,
-                eggz_q22.safe[id_disk]*fbti + eggz_q22.safe[id_bulge]*fbtn
+                egg_q11.safe[id_disk]*fbti + egg_q11.safe[id_bulge]*fbtn,
+                egg_q12.safe[id_disk]*fbti + egg_q12.safe[id_bulge]*fbtn,
+                egg_q22.safe[id_disk]*fbti + egg_q22.safe[id_bulge]*fbtn
             );
 
             m_tr.add(id_type, tngal*tr);
@@ -234,47 +234,6 @@ public :
         }
     }
 
-    bool read_egg_psfs(uint_t iz) {
-        std::string zdir = "full_z"+to_string(iz)+"/";
-        std::string filename = psf_dir+zdir+"psfs-rebin2-cst.txt";
-        if (!file::exists(filename)) return false;
-
-        // Read PSF library
-        ascii::read_table(filename, egg_ssed, egg_zz, _, _, _, egg_q11, egg_q12, egg_q22);
-
-        phypp_check(!egg_zz.empty(), "empty PSF file '", filename, "'");
-
-        // Get SED ID
-        // Make sure SED ID is of the form xx-yy (i.e. convert 9 to 09)
-        for (uint_t i : range(egg_ssed)) {
-            vec1s spl = split(egg_ssed.safe[i], "-");
-            if (spl[0].size() == 1) {
-                spl[0] = '0'+spl[0];
-            }
-            if (spl[1].size() == 1) {
-                spl[1] = '0'+spl[1];
-            }
-
-            egg_ssed.safe[i] = spl[0]+'-'+spl[1];
-        }
-
-        // Sort by z then SED
-        {
-            vec1u ids = sort(egg_zz+egg_ssed);
-            egg_ssed  = egg_ssed[ids];
-            egg_zz    = egg_zz[ids];
-            egg_q11   = egg_q11[ids];
-            egg_q12   = egg_q12[ids];
-            egg_q22   = egg_q22[ids];
-        }
-
-        // Find redshifts
-        egg_sz = unique_values_sorted(egg_zz);
-        from_string(replace(egg_sz, "p", "."), egg_z);
-
-        return true;
-    }
-
     virtual void initialize_redshift_bin(uint_t iz) {}
 
     virtual void initialize_redshift_slice(uint_t itz) {}
@@ -288,8 +247,6 @@ public :
     virtual void initialize_cache() {}
 
     bool average_redshift_bin(uint_t iz) {
-        if (!read_egg_psfs(iz)) return false;
-
         uint_t ntz = max(floor((zb[iz+1]-zb[iz])/dz), 1);
         uzf = zb[iz] + dz*dindgen(ntz);
 
@@ -312,22 +269,31 @@ public :
 
             double zf = uzf.safe[itz];
 
-            // Pre-select redshift slice in EGG PSF library
-            vec1u idz = where(egg_zz == egg_sz[min_id(abs(egg_z - zf))]);
-            eggz_q11.resize(use.dims);
-            eggz_q12.resize(use.dims);
-            eggz_q22.resize(use.dims);
+            // Compute PSF moments for each template in the library
+            egg_q11.resize(use.dims);
+            egg_q12.resize(use.dims);
+            egg_q22.resize(use.dims);
+            egg_fvis.resize(use.dims);
 
-            for (uint_t i : idz) {
-                vec1s spl = split(egg_ssed.safe[i], "-");
+            for (uint_t iuv : range(use.dims[0]))
+            for (uint_t ivj : range(use.dims[1])) {
+                if (!use(iuv, ivj)) continue;
 
-                uint_t iuv, ivj;
-                from_string(spl[0], iuv);
-                from_string(spl[1], ivj);
+                vec1d tlam = lam(iuv,ivj,_);
+                vec1d tsed = sed(iuv,ivj,_);
 
-                eggz_q11.safe(iuv,ivj) = egg_q11.safe[i];
-                eggz_q12.safe(iuv,ivj) = egg_q12.safe[i];
-                eggz_q22.safe(iuv,ivj) = egg_q22.safe[i];
+                if (!naive_igm) {
+                    apply_madau_igm(zf, tlam, tsed);
+                }
+
+                tsed = lsun2uJy(zf, 1.0, tlam, tsed);
+                tlam *= (1.0 + zf);
+
+                double fvis       = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
+                egg_q11(iuv,ivj)  = sed2flux(psf_filter.lam, psf_filter.res*mono_q11, tlam, tsed)/fvis;
+                egg_q12(iuv,ivj)  = sed2flux(psf_filter.lam, psf_filter.res*mono_q12, tlam, tsed)/fvis;
+                egg_q22(iuv,ivj)  = sed2flux(psf_filter.lam, psf_filter.res*mono_q22, tlam, tsed)/fvis;
+                egg_fvis(iuv,ivj) = fvis;
             }
 
             // Reset averages
