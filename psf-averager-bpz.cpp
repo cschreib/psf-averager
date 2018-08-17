@@ -55,7 +55,6 @@ public :
 
     // Config
     double gauss_convolve = dnan;
-    double dzfit = dnan;
     vec1d gconv;
     uint_t wconv = npos;
     uint_t id_prior = npos;
@@ -107,13 +106,13 @@ public :
 
         // Make convolver kernel
         {
-            uint_t npt = 18*gauss_convolve/dzfit;
+            uint_t npt = 18*gauss_convolve/opts.zfit_dz;
             if (npt % 2 == 0) ++npt;
             wconv = npt/2;
 
             // This is a gaussian trucated between -9*sigma and +9*sigma
-            vec1d kz = dzfit*(findgen(npt)-wconv);
-            gconv = integrate_gauss(kz-dzfit/2.0, kz+dzfit/2.0, 0.0, gauss_convolve);
+            vec1d kz = opts.zfit_dz*(findgen(npt)-wconv);
+            gconv = integrate_gauss(kz-opts.zfit_dz/2.0, kz+opts.zfit_dz/2.0, 0.0, gauss_convolve);
             gconv /= total(gconv);
         }
     }

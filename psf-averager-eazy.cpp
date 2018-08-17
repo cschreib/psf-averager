@@ -769,6 +769,7 @@ public :
         }
 
         // Pre-compute template error function
+        tpl_err.resize(nzfit, nband);
         for (uint_t izf : range(nzfit)) {
             for (uint_t l : range(nband)) {
                 double lobs = filters[l].rlam/(1.0+zfit[izf]);
@@ -789,7 +790,6 @@ public :
         pz.resize(nmc, nzfit);
         chi2_best.resize(nmc);
         tpz.resize(nzfit);
-        tpl_err.resize(nzfit, nband);
 
         wflux.resize(nband);
         rflux.resize(nband);
