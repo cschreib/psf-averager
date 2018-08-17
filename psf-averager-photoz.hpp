@@ -51,6 +51,9 @@ public :
     std::string psf_dir;
     filter_t psf_filter;
 
+    bool single_pass = false;
+    bool global_progress_bar = false;
+
     const std::string fitter;
 
     bool no_noise = false;
@@ -82,7 +85,7 @@ public :
         nmc = opts.nmc;
         seed = make_seed(opts.seed);
 
-        if (no_noise) {
+        if (no_noise && nmc != 1) {
             note("no_noise set, setting nmc=1");
             nmc = 1;
         }
@@ -224,7 +227,10 @@ public :
             }
 
             ++iter;
-            progress(pgi);
+
+            if (!global_progress_bar) {
+                progress(pgi);
+            }
         }
     }
 
@@ -295,8 +301,14 @@ public :
         dndz_qu.resize(ntz);
         dndz_sf.resize(ntz);
 
+        if (global_progress_bar) {
+            pgi = progress_start(ntz);
+        }
+
         for (uint_t itz : range(ntz)) {
-            print(itz, "/", ntz);
+            if (!global_progress_bar) {
+                print(itz, "/", ntz);
+            }
 
             double zf = uzf.safe[itz];
 
@@ -323,11 +335,13 @@ public :
             ngal = 0; nqu = 0; nsf = 0;
 
             // Pre-compute number of iterations
-            note("compute number of iterations...");
-            niter = 0;
-            just_count = true;
-            generate(zf, dz);
-            note("done: ", niter);
+            if (!single_pass) {
+                note("compute number of iterations...");
+                niter = 0;
+                just_count = true;
+                generate(zf, dz);
+                note("done: ", niter);
+            }
 
             // Initialize fitter
             initialize_redshift_slice(itz);
@@ -396,7 +410,9 @@ public :
             // Compute averages at that redshift
             iter = 0;
             just_count = false;
-            pgi = progress_start(niter);
+            if (!global_progress_bar) {
+                pgi = progress_start(niter);
+            }
             generate(zf, dz);
 
             // Average quantities and store
@@ -408,6 +424,10 @@ public :
 
             // Store results from fitter
             finalize_redshift_slice(itz);
+
+            if (global_progress_bar) {
+                progress(pgi);
+            }
         }
 
         // Average over N(z)
