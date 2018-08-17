@@ -347,10 +347,12 @@ public :
             initialize_redshift_slice(itz);
 
             // Initialize cache
-            std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
-            std::string cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
-            cache_filename = "cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
-            note("cache file: ", cache_filename);
+            if (use_cache || write_cache) {
+                std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
+                std::string cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
+                cache_filename = "cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
+                note("cache file: ", cache_filename);
+            }
 
             cache_available = false;
             if (use_cache && file::exists(cache_filename)) {
