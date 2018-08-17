@@ -318,10 +318,10 @@ Q_{22} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,(y - \bar{y}
 with
 \begin{align}
 \bar{x} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,x}{F_w}\,, \\
-\bar{y} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,y}{F_w}\,,
+\bar{y} &= \frac{\sum_{x, y} {\rm PSF}(x,y)\,W(x,y,\bar{x},\bar{y})\,y}{F_w}\,.
 \end{align}
 
-The weighting function $W(x,y)$ is a constant 2D Gaussian function of $\sigma=0.7"$ centered on $(\bar{x}, \bar{y})$, which attenuates the pixels further away from the center and stabilizes the moments. Because this weighting function depends on $\bar{x}$ and $\bar{y}$, which themselves also depend on the weighting function, the process must be iterated until convergence of $\bar{x}$ and $\bar{y}$. The PSFs produced by the toolkit are such that $\sum_{x,y}{\rm PSF}(x,y) = 1$.
+The weighting function $W$ is a constant 2D Gaussian function of $\sigma=0.7"$ centered on $(\bar{x}, \bar{y})$, which attenuates the pixels further away from the center and stabilizes the moments. Because this weighting function depends on $\bar{x}$ and $\bar{y}$, which themselves also depend on the weighting function, the process must be iterated until convergence of $\bar{x}$ and $\bar{y}$. Note that the PSFs produced by the toolkit are such that $\sum_{x,y}{\rm PSF}(x,y) = 1$, but because the weighting function removes flux from the PSF, in general we have $F_w < 1$.
 
 From these equations, it follows that when summing two PSFs, and assuming the centroids $(\bar{x},\bar{y})$ are identical\footnote{This approximation induces an error on the ellipticities of order $10^{-8}$, far below the Euclid requirements.}, the moments of the summed PSF are the weighted averages of the moments of each PSF. The weights are the relative fluxes of each PSF (accounting, in particular, for the effect of the weighting function, which affects the total flux of the PSFs in a non-trivial way). This means that, for an SED $s$, we can actually write the moments of the corresponding PSF as an integral over wavelengths:
 \begin{align}
