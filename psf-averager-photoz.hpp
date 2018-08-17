@@ -395,9 +395,11 @@ public :
                 vec1f lambda(nband+1);
                 tbands[0] = selection_band;
                 lambda[0] = selection_filter.rlam;
-                tbands[1-_] = bands;
-                for (uint_t l : range(filters)) {
-                    lambda[l+1] = filters[l].rlam;
+                if (nband > 0) {
+                    tbands[1-_] = bands;
+                    for (uint_t l : range(filters)) {
+                        lambda[l+1] = filters[l].rlam;
+                    }
                 }
                 fitter_cache.write_columns("bands", tbands, "lambda", lambda);
 
