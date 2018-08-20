@@ -10,8 +10,10 @@ struct fitter_options {
     double fit_tftol = 1e-4;
     bool apply_igm = true;
     bool use_noline_library = false;
+    bool use_egg_library = false;
+    uint_t egg_sed_step = 1;
     bool force_true_z = false;
-    bool limited_set = false;
+    uint_t limited_set = 0;
 };
 
 class eazy_averager : public psf_averager {
@@ -65,7 +67,9 @@ public :
     bool apply_igm = true;
     bool force_true_z = false;
     bool use_noline_library = false;
-    bool limited_set = false;
+    bool use_egg_library = false;
+    uint_t egg_sed_step = 1;
+    uint_t limited_set = 0;
     double fit_tftol = 1e-4;
 
 
@@ -76,8 +80,15 @@ public :
         apply_igm = opts.apply_igm;
         force_true_z = opts.force_true_z;
         use_noline_library = opts.use_noline_library;
+        use_egg_library = opts.use_egg_library;
+        egg_sed_step = opts.egg_sed_step;
         limited_set = opts.limited_set;
         fit_tftol = opts.fit_tftol;
+
+        if (limited_set > 3) {
+            warning("'limited_set' can be at most equal to 3, set to zero to use all set");
+            limited_set = 3;
+        }
 
         prior_filter = opts.prior_filter;
         prior_file = opts.prior_file;
@@ -104,30 +115,57 @@ public :
     void make_sed_library() {
         // List SEDs
         std::string sed_dir = "/home/cschreib/programming/eazy-photoz/templates/";
-        if (use_noline_library) {
-            eazy_seds = sed_dir + vec1s{
-                "EAZY_v1.1_noline/eazy_v1.1_sed1.dat",
-                "EAZY_v1.1_noline/eazy_v1.1_sed2.dat",
-                "EAZY_v1.1_noline/eazy_v1.1_sed3.dat",
-                "EAZY_v1.1_noline/eazy_v1.1_sed4.dat",
-                "EAZY_v1.1_noline/eazy_v1.1_sed5.dat",
-                "EAZY_v1.1_noline/eazy_v1.1_sed6.dat",
-                "EAZY_v1.1_noline/eazy_v1.1_sed7.dat",
-                "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
-                "erb2010_highEW.dat"
-            };
+        if (use_egg_library) {
+            eazy_seds = sed_dir+"EGG/"+file::list_files(sed_dir+"EGG/", "*.dat");
+            inplace_sort(eazy_seds);
+
+            if (egg_sed_step > 1) {
+                // Remove some SEDs to save time
+                vec1b keep(eazy_seds.size());
+                vec1s lib_sid(eazy_seds.size());
+                for (uint_t i : range(eazy_seds)) {
+                    lib_sid[i] = eazy_seds[i].substr((sed_dir+"EGG/egg-").size(), 5);
+                }
+
+                for (uint_t iuv : range(use.dims[0]))
+                for (uint_t ivj : range(use.dims[1])) {
+                    std::string suv = align_right(to_string(iuv), 2, '0');
+                    std::string svj = align_right(to_string(ivj), 2, '0');
+                    std::string sid = suv+"-"+svj;
+                    uint_t i = where_first(lib_sid == sid);
+                    if (i != npos) {
+                        keep[i] = (iuv+ivj) % egg_sed_step == 0;
+                    }
+                }
+
+                eazy_seds = eazy_seds[where(keep)];
+            }
         } else {
-            eazy_seds = sed_dir + vec1s{
-                "EAZY_v1.1_lines/eazy_v1.1_sed1.dat",
-                "EAZY_v1.1_lines/eazy_v1.1_sed2.dat",
-                "EAZY_v1.1_lines/eazy_v1.1_sed3.dat",
-                "EAZY_v1.1_lines/eazy_v1.1_sed4.dat",
-                "EAZY_v1.1_lines/eazy_v1.1_sed5.dat",
-                "EAZY_v1.1_lines/eazy_v1.1_sed6.dat",
-                "EAZY_v1.1_lines/eazy_v1.1_sed7.dat",
-                "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
-                "erb2010_highEW.dat"
-            };
+            if (use_noline_library) {
+                eazy_seds = sed_dir + vec1s{
+                    "EAZY_v1.1_noline/eazy_v1.1_sed1.dat",
+                    "EAZY_v1.1_noline/eazy_v1.1_sed2.dat",
+                    "EAZY_v1.1_noline/eazy_v1.1_sed3.dat",
+                    "EAZY_v1.1_noline/eazy_v1.1_sed4.dat",
+                    "EAZY_v1.1_noline/eazy_v1.1_sed5.dat",
+                    "EAZY_v1.1_noline/eazy_v1.1_sed6.dat",
+                    "EAZY_v1.1_noline/eazy_v1.1_sed7.dat",
+                    "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
+                    "erb2010_highEW.dat"
+                };
+            } else {
+                eazy_seds = sed_dir + vec1s{
+                    "EAZY_v1.1_lines/eazy_v1.1_sed1.dat",
+                    "EAZY_v1.1_lines/eazy_v1.1_sed2.dat",
+                    "EAZY_v1.1_lines/eazy_v1.1_sed3.dat",
+                    "EAZY_v1.1_lines/eazy_v1.1_sed4.dat",
+                    "EAZY_v1.1_lines/eazy_v1.1_sed5.dat",
+                    "EAZY_v1.1_lines/eazy_v1.1_sed6.dat",
+                    "EAZY_v1.1_lines/eazy_v1.1_sed7.dat",
+                    "Dusty/c09_del_8.6_z_0.019_chab_age09.40_av2.0.dat",
+                    "erb2010_highEW.dat"
+                };
+            }
         }
 
         ntemplate = eazy_seds.size();
@@ -353,7 +391,7 @@ public :
 
                 double tchi2;
 
-                if (limited_set) {
+                if (limited_set > 0) {
                     tchi2 = finf;
 
                     // Find best combination using 1, 2, or 3 templates from the library.
@@ -430,11 +468,15 @@ public :
                     for (uint_t i1 : range(ntemplate)) {
                         try_fit_single(i1);
 
-                        for (uint_t i2 : range(i1+1, ntemplate)) {
-                            try_fit_two(i1, i2);
+                        if (limited_set > 1) {
+                            for (uint_t i2 : range(i1+1, ntemplate)) {
+                                try_fit_two(i1, i2);
 
-                            for (uint_t i3 : range(i2+1, ntemplate)) {
-                                try_fit_three(i1, i2, i3);
+                                if (limited_set > 2) {
+                                    for (uint_t i3 : range(i2+1, ntemplate)) {
+                                        try_fit_three(i1, i2, i3);
+                                    }
+                                }
                             }
                         }
                     }
@@ -682,8 +724,8 @@ public :
     }
 
     std::string make_cache_hash() override {
-        return hash(use_noline_library, limited_set, prior_file, prior_filter, apply_igm, zfit,
-            eazy_seds, tpl_error_y, fit_tftol);
+        return hash(use_noline_library, use_egg_library, egg_sed_step, limited_set,
+            prior_file, prior_filter, apply_igm, zfit, eazy_seds, tpl_error_y, fit_tftol);
     }
 
     void initialize_redshift_slice(uint_t itz) override {
@@ -875,7 +917,9 @@ int phypp_main(int argc, char* argv[]) {
     bool force_true_z = false;
     bool no_noise = false;
     bool use_noline_library = false;
-    bool limited_set = false;
+    bool use_egg_library = false;
+    uint_t limited_set = 0;
+    uint_t egg_sed_step = 1;
     bool write_cache = true;
     bool use_cache = true;
     uint_t iz = 5;
@@ -883,7 +927,8 @@ int phypp_main(int argc, char* argv[]) {
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
-        template_error_amp, force_true_z, no_noise, use_noline_library, limited_set
+        template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
+        limited_set, egg_sed_step
     ));
 
     eazy_averager pavg;
@@ -927,6 +972,8 @@ int phypp_main(int argc, char* argv[]) {
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
     fopts.use_noline_library = use_noline_library;
+    fopts.use_egg_library = use_egg_library;
+    fopts.egg_sed_step = egg_sed_step;
     fopts.limited_set = limited_set;
     pavg.configure_fitter(fopts);
 
