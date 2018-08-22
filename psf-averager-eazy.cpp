@@ -400,29 +400,21 @@ public :
                     tchi2 = finf;
 
                     // Find best combination using 1, 2, or 3 templates from the library.
-                    auto check_chi2 = [&](const vec1d& coefs) {
-                        double chi2 = 0.0;
-                        for (uint_t l : range(nband)) {
-                            double tm = 0.0;
-                            for (uint_t it : range(ntemplate)) {
-                                tm += coefs.safe[it]*wm[it*nband+l];
-                            }
-                            chi2 += sqr(wf[l] - tm);
-                        }
-
-                        if (chi2 < tchi2) {
-                            tchi2 = chi2;
-                            tcoefs = coefs;
-                        }
-                    };
-
                     auto try_fit_single = [&](uint_t j) {
                         double coef = beta.safe[j]/alpha.safe(j,j);
 
                         if (coef >= 0) {
-                            vec1d coefs(ntemplate);
-                            coefs.safe[j] = coef;
-                            check_chi2(coefs);
+                            double chi2 = 0.0;
+                            for (uint_t l : range(nband)) {
+                                double tm = coef*wm[j*nband+l];
+                                chi2 += sqr(wf[l] - tm);
+                            }
+
+                            if (chi2 < tchi2) {
+                                tchi2 = chi2;
+                                tcoefs = replicate(0.0, ntemplate);
+                                tcoefs.safe[j] = coef;
+                            }
                         }
                     };
 
@@ -436,10 +428,18 @@ public :
                         coef2 /= det;
 
                         if (coef1 >= 0 && coef2 >= 0) {
-                            vec1d coefs(ntemplate);
-                            coefs.safe[j1] = coef1;
-                            coefs.safe[j2] = coef2;
-                            check_chi2(coefs);
+                            double chi2 = 0.0;
+                            for (uint_t l : range(nband)) {
+                                double tm = coef1*wm[j1*nband+l] + coef2*wm[j2*nband+l];
+                                chi2 += sqr(wf[l] - tm);
+                            }
+
+                            if (chi2 < tchi2) {
+                                tchi2 = chi2;
+                                tcoefs = replicate(0.0, ntemplate);
+                                tcoefs.safe[j1] = coef1;
+                                tcoefs.safe[j2] = coef2;
+                            }
                         }
                     };
 
@@ -462,11 +462,19 @@ public :
                         coef3 /= det;
 
                         if (coef1 >= 0 && coef2 >= 0 && coef3 >= 0) {
-                            vec1d coefs(ntemplate);
-                            coefs.safe[j1] = coef1;
-                            coefs.safe[j2] = coef2;
-                            coefs.safe[j3] = coef3;
-                            check_chi2(coefs);
+                            double chi2 = 0.0;
+                            for (uint_t l : range(nband)) {
+                                double tm = coef1*wm[j1*nband+l] + coef2*wm[j2*nband+l] + coef3*wm[j3*nband+l];
+                                chi2 += sqr(wf[l] - tm);
+                            }
+
+                            if (chi2 < tchi2) {
+                                tchi2 = chi2;
+                                tcoefs = replicate(0.0, ntemplate);
+                                tcoefs.safe[j1] = coef1;
+                                tcoefs.safe[j2] = coef2;
+                                tcoefs.safe[j3] = coef3;
+                            }
                         }
                     };
 
