@@ -8,10 +8,10 @@ public :
         global_progress_bar = true;
     }
 
-    void process_cached(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+    void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {}
 
-    void do_fit(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+    void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {}
 
     void set_priors(const vec1d& fdisk, const vec1d& fbulge) override {}

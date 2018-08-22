@@ -137,15 +137,15 @@ public :
         }
     }
 
-    virtual void process_cached(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
+    virtual void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk,
+        uint_t id_bulge, uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
 
-    virtual void do_fit(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
+    virtual void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk,
+        uint_t id_bulge, uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
 
     virtual void set_priors(const vec1d& fdisk, const vec1d& fbulge) = 0;
 
-    void on_generated(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+    void on_generated(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
         const double ftot = fdisk.safe[0] + fbulge.safe[0];
@@ -225,8 +225,6 @@ public :
                     fitter_cache.open(cache_filename);
                 }
             }
-
-            ++iter;
 
             if (!global_progress_bar) {
                 progress(pgi);

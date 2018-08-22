@@ -373,7 +373,7 @@ public :
         }
     }
 
-    void compute_averages(uint_t id_type, double tngal) {
+    void compute_averages(uint_t iter, const workspace& w, uint_t id_type, double tngal) {
         // Maximum likelihood
         // ------------------
 
@@ -421,16 +421,16 @@ public :
         }
     }
 
-    void process_cached(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+    void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
         fitter_cache.read_elements("bmodel", cache_bmodel, fits::at(iter,_));
         fitter_cache.read_elements("pmodel", cache_pmodel, fits::at(iter,_));
 
-        compute_averages(id_type, tngal);
+        compute_averages(iter, id_type, tngal);
     }
 
-    void do_fit(uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+    void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
         // Create noise-free photometry
