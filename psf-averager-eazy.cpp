@@ -14,6 +14,7 @@ struct fitter_options {
     uint_t egg_sed_step = 1;
     bool force_true_z = false;
     uint_t limited_set = 0;
+    bool cache_save_pmodel = true;
 };
 
 class eazy_averager : public psf_averager {
@@ -68,6 +69,7 @@ public :
     bool force_true_z = false;
     bool use_noline_library = false;
     bool use_egg_library = false;
+    bool cache_save_pmodel = true;
     uint_t egg_sed_step = 1;
     uint_t limited_set = 0;
     double fit_tftol = 1e-4;
@@ -84,6 +86,7 @@ public :
         egg_sed_step = opts.egg_sed_step;
         limited_set = opts.limited_set;
         fit_tftol = opts.fit_tftol;
+        cache_save_pmodel = opts.cache_save_pmodel;
 
         if (limited_set > 3) {
             warning("'limited_set' can be at most equal to 3, set to zero to use all set");
@@ -562,11 +565,13 @@ public :
         cache_pc /= nmc;
 
         if (write_cache) {
-            fitter_cache.update_elements("best_chi2",  chi2_best,   fits::at(iter,_));
-            fitter_cache.update_elements("best_coef",  cache_bestc, fits::at(iter,_,_));
-            fitter_cache.update_elements("best_z",     cache_bestz, fits::at(iter,_));
-            fitter_cache.update_elements("pz",         cache_pz,    fits::at(iter,_));
-            fitter_cache.update_elements("pc",         cache_pc,    fits::at(iter,_));
+            fitter_cache.update_elements("best_chi2", chi2_best,   fits::at(iter,_));
+            fitter_cache.update_elements("best_z",    cache_bestz, fits::at(iter,_));
+            if (cache_save_pmodel) {
+                fitter_cache.update_elements("best_coef", cache_bestc, fits::at(iter,_,_));
+                fitter_cache.update_elements("pz",        cache_pz,    fits::at(iter,_));
+                fitter_cache.update_elements("pc",        cache_pc,    fits::at(iter,_));
+            }
         }
 
         compute_averages(id_type, tngal);
@@ -848,11 +853,13 @@ public :
 
     void initialize_cache() override {
         // Initialize arrays
-        fitter_cache.allocate_column<float>("best_coef",      niter, nmc, ntemplate);
         fitter_cache.allocate_column<float>("best_chi2",      niter, nmc);
         fitter_cache.allocate_column<uint_t>("best_z",        niter, nmc);
-        fitter_cache.allocate_column<float>("pz",             niter, nzfit);
-        fitter_cache.allocate_column<float>("pc",             niter, nmodel);
+        if (cache_save_pmodel) {
+            fitter_cache.allocate_column<float>("best_coef",  niter, nmc, ntemplate);
+            fitter_cache.allocate_column<float>("pz",         niter, nzfit);
+            fitter_cache.allocate_column<float>("pc",         niter, nmodel);
+        }
         fitter_cache.allocate_column<float>("e1_eazy_ml",     niter);
         fitter_cache.allocate_column<float>("e2_eazy_ml",     niter);
         fitter_cache.allocate_column<float>("r2_eazy_ml",     niter);
@@ -922,13 +929,14 @@ int phypp_main(int argc, char* argv[]) {
     uint_t egg_sed_step = 1;
     bool write_cache = true;
     bool use_cache = true;
+    bool cache_save_pmodel = true;
     uint_t iz = 5;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
-        limited_set, egg_sed_step
+        limited_set, egg_sed_step, cache_save_pmodel
     ));
 
     eazy_averager pavg;
@@ -975,6 +983,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.use_egg_library = use_egg_library;
     fopts.egg_sed_step = egg_sed_step;
     fopts.limited_set = limited_set;
+    fopts.cache_save_pmodel = cache_save_pmodel;
     pavg.configure_fitter(fopts);
 
     // Average PSF metrics
