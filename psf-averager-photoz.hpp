@@ -33,7 +33,6 @@ public :
 
     bool just_count = false;
     uint_t niter = 0;
-    uint_t iter = 0;
 
     progress_t pgi;
 
