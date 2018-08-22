@@ -3,6 +3,7 @@
 struct fitter_options {
     std::string prior_file;
     std::string prior_filter;
+    std::string sed_dir;
     double zfit_max = 7.0;
     double zfit_dz = 0.01;
     std::string template_error;
@@ -73,6 +74,7 @@ public :
     uint_t egg_sed_step = 1;
     uint_t limited_set = 0;
     double fit_tftol = 1e-4;
+    std::string sed_dir;
 
 
     eazy_averager() : psf_averager("eazy") {}
@@ -87,6 +89,7 @@ public :
         limited_set = opts.limited_set;
         fit_tftol = opts.fit_tftol;
         cache_save_pmodel = opts.cache_save_pmodel;
+        sed_dir = opts.sed_dir;
 
         if (limited_set > 3) {
             warning("'limited_set' can be at most equal to 3, set to zero to use all set");
@@ -117,7 +120,6 @@ public :
 
     void make_sed_library() {
         // List SEDs
-        std::string sed_dir = "/home/cschreib/programming/eazy-photoz/templates/";
         if (use_egg_library) {
             eazy_seds = sed_dir+"EGG/"+file::list_files(sed_dir+"EGG/", "*.dat");
             inplace_sort(eazy_seds);
@@ -903,6 +905,12 @@ public :
 };
 
 int phypp_main(int argc, char* argv[]) {
+    // External data
+    std::string share_dir = "/home/cschreib/code/egg/share/";
+    std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
+    std::string psf_file  = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
+    std::string sed_dir   = "/home/cschreib/programming/eazy-photoz/templates/";
+
     // Survey definition
     double maglim = 24.5;
     std::string selection_band = "euclid-vis";
@@ -936,7 +944,7 @@ int phypp_main(int argc, char* argv[]) {
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
-        limited_set, egg_sed_step, cache_save_pmodel
+        limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir
     ));
 
     eazy_averager pavg;
@@ -945,8 +953,8 @@ int phypp_main(int argc, char* argv[]) {
 
     // Setup survey
     egg::generator_options opts;
-    opts.share_dir = "/home/cschreib/code/egg/share/";
-    opts.filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
+    opts.share_dir = share_dir;
+    opts.filter_db = filter_db;
     opts.filter_flambda = true; // equivalent to FILTER_FORMAT=1
     opts.filter_photons = true; // equivalent to FILTER_FORMAT=1
     opts.trim_filters = true;
@@ -966,7 +974,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
-    mopts.psf_file = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
+    mopts.psf_file = psf_file;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting
@@ -984,6 +992,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.egg_sed_step = egg_sed_step;
     fopts.limited_set = limited_set;
     fopts.cache_save_pmodel = cache_save_pmodel;
+    fotps.sed_dir = sed_dir;
     pavg.configure_fitter(fopts);
 
     // Average PSF metrics

@@ -12,6 +12,7 @@ struct fitter_options {
     bool apply_igm = true;
     bool force_true_z = false;
     bool cache_save_pmodel = true;
+    std::string sed_dir;
 };
 
 class bpz_averager : public psf_averager {
@@ -65,6 +66,7 @@ public :
     bool apply_igm = true;
     bool force_true_z = false;
     bool cache_save_pmodel = true;
+    std::string sed_dir;
 
     bpz_averager() : psf_averager("bpz") {}
 
@@ -80,6 +82,7 @@ public :
         apply_igm = opts.apply_igm;
         force_true_z = opts.force_true_z;
         cache_save_pmodel = opts.cache_save_pmodel;
+        sed_dir = opts.sed_dir;
 
         // Kernel used to convolve the P(z) to wash out too small fluctuations
         gauss_convolve = opts.gauss_convolve;
@@ -119,30 +122,30 @@ public :
 
     void make_sed_library() {
         // Locate SEDs
-        std::string sed_dir;
+        std::string tsed_dir;
         if (use_egg_library) {
-            sed_dir = "SED_egg/";
+            tsed_dir = "SED_egg/";
         } else {
             if (use_capak_library) {
                 if (use_noline_library) {
-                    sed_dir = "SED_capak_noline/";
+                    tsed_dir = "SED_capak_noline/";
                 } else {
-                    sed_dir = "SED_capak/";
+                    tsed_dir = "SED_capak/";
                 }
             } else {
-                sed_dir = "SED/";
+                tsed_dir = "SED/";
             }
         }
 
-        sed_dir = "/home/cschreib/programming/bpz-1.99.3/"+sed_dir;
+        tsed_dir = sed_dir+tsed_dir;
 
-        bpz_seds = file::list_files(sed_dir, "*.sed");
+        bpz_seds = file::list_files(tsed_dir, "*.sed");
 
         // Sort BPZ SEDs by color (red to blue)
         vec1d color(bpz_seds.size()); {
             for (uint_t t : range(bpz_seds)) {
                 vec1d rlam, rsed;
-                ascii::read_table(sed_dir+bpz_seds[t], rlam, rsed);
+                ascii::read_table(tsed_dir+bpz_seds[t], rlam, rsed);
                 rsed *= 1e-19;
                 rsed = cgs2uJy(rlam, rsed);
 
@@ -180,7 +183,7 @@ public :
             note(" - ", i, ": ", bpz_seds[i]);
         }
 
-        bpz_seds = sed_dir+bpz_seds;
+        bpz_seds = tsed_dir+bpz_seds;
 
         // Interpolate the templates
         if (ninterp > 0) {
@@ -762,6 +765,12 @@ public :
 };
 
 int phypp_main(int argc, char* argv[]) {
+    // External data
+    std::string share_dir = "/home/cschreib/code/egg/share/";
+    std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
+    std::string psf_file  = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
+    std::string sed_dir   = "/home/cschreib/programming/bpz-1.99.3/";
+
     // Survey definition
     double maglim = 24.5;
     std::string selection_band = "euclid-vis";
@@ -791,7 +800,8 @@ int phypp_main(int argc, char* argv[]) {
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
-        use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel
+        use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel, share_dir,
+        filter_db, psf_file, sed_dir
     ));
 
     bpz_averager pavg;
@@ -800,8 +810,8 @@ int phypp_main(int argc, char* argv[]) {
 
     // Setup survey
     egg::generator_options opts;
-    opts.share_dir = "/home/cschreib/code/egg/share/";
-    opts.filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
+    opts.share_dir = share_dir;
+    opts.filter_db = filter_db;
     opts.filter_flambda = true;
     opts.filter_photons = true;
     opts.trim_filters = true;
@@ -821,7 +831,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
     mopts.no_noise = no_noise;
-    mopts.psf_file = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
+    mopts.psf_file = psf_file;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting
@@ -836,6 +846,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
     fopts.cache_save_pmodel = cache_save_pmodel;
+    fopts.sed_dir = sed_dir;
     pavg.configure_fitter(fopts);
 
     // Average PSF metrics
