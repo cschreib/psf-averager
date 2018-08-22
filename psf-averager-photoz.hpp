@@ -9,6 +9,10 @@ struct mock_options {
     double min_mag_err = 0.05;
     bool no_noise = false;
     std::string psf_file;
+    bool keep_individuals_in_memory = false;
+    bool write_individuals = false;
+    bool keep_averages_in_memory = false;
+    bool write_averages = false;
 };
 
 class psf_averager : public egg::generator {
@@ -17,7 +21,17 @@ public :
     double ngal = 0, nqu = 0, nsf = 0;
 
     // Averages
+    std::mutex avg_mutex;
     metrics_set m_tr; // EGG (truth)
+    vec1d uzf;
+    vec1d dndz, dndz_qu, dndz_sf;
+
+    // Individuals
+    vec<1,metrics> indiv_tr; // EGG (truth)
+    vec1u indiv_id_mass, indiv_id_type, indiv_id_disk, indiv_id_bulge, indiv_id_bt;
+    vec1d indiv_ngal;
+    vec1f indiv_uv, indiv_vj;
+    vec2f indiv_fdisk, indiv_fbulge;
 
     // Monochromatic PSF library
     vec1d mono_lam, mono_q11, mono_q12, mono_q22, mono_w;
@@ -28,8 +42,6 @@ public :
 
     // Internal variables
     vec2d mc;
-    vec1d uzf;
-    vec1d dndz, dndz_qu, dndz_sf;
 
     bool just_count = false;
     uint_t niter = 0;
@@ -54,11 +66,19 @@ public :
     bool no_noise = false;
 
     // Cache
+    std::mutex cache_mutex;
     std::string cache_filename;
     fits::table fitter_cache;
-    bool write_cache = true;
-    bool use_cache = true;
+    bool write_cache = false;
+    bool use_cache = false;
     bool cache_available = false;
+
+    // Individual measurements
+    bool keep_individuals_in_memory = false;
+    bool write_individuals = false;
+    bool keep_averages_in_memory = false;
+    bool write_averages = false;
+    std::string indiv_filename;
 
     psf_averager(const std::string& f) : egg::generator(), fitter(f) {}
 
@@ -67,6 +87,21 @@ public :
         dz = opts.dz;
         no_noise = opts.no_noise;
         psf_file = opts.psf_file;
+        keep_individuals_in_memory = opts.keep_individuals_in_memory;
+        write_individuals = opts.write_individuals;
+        keep_averages_in_memory = opts.keep_averages_in_memory;
+        write_averages = opts.write_averages;
+
+        if (nthread > 1) {
+            global_progress_bar = true;
+        }
+
+        if (write_individuals) {
+            keep_individuals_in_memory = true;
+        }
+        if (write_averages) {
+            keep_averages_in_memory = true;
+        }
 
         // Square of photometric error (Gaussian additive component)
         phot_err2 = sqr(mag2uJy(opts.depths)/10.0);
@@ -130,9 +165,9 @@ public :
 
             tsed = lsun2uJy(0.0, 1.0, tlam, tsed);
 
-            egg_fu(iuv, ivj) = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
-            egg_fv(iuv, ivj) = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
-            egg_fj(iuv, ivj) = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
+            egg_fu(iuv,ivj) = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
+            egg_fv(iuv,ivj) = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
+            egg_fj(iuv,ivj) = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
         }
     }
 
@@ -141,8 +176,6 @@ public :
 
     virtual void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk,
         uint_t id_bulge, uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
-
-    virtual void set_priors(const vec1d& fdisk, const vec1d& fbulge) = 0;
 
     void on_generated(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
@@ -153,6 +186,7 @@ public :
             // We passed the magnitude cut!
 
             if (just_count) {
+                // This is always single-threaded, no need to worry
                 ++niter;
                 return;
             }
@@ -173,13 +207,46 @@ public :
                 egg_q22.safe[id_disk]*fbti + egg_q22.safe[id_bulge]*fbtn
             );
 
-            m_tr.add(id_type, tngal*tr);
+            // Compute actual UVJ colors
+            double mbt = bt.safe[id_bt];
+            double mbti = 1.0 - mbt;
+            double rfu = egg_fu.safe[id_disk]*mbti + mbt*egg_fu.safe[id_bulge];
+            double rfv = egg_fv.safe[id_disk]*mbti + mbt*egg_fv.safe[id_bulge];
+            double rfj = egg_fj.safe[id_disk]*mbti + mbt*egg_fj.safe[id_bulge];
+            double rfuv = -2.5*log10(rfu/rfv);
+            double rfvj = -2.5*log10(rfv/rfj);
 
-            ngal += tngal;
-            if (id_type == 0) {
-                nqu += tngal;
-            } else {
-                nsf += tngal;
+            // Store average values if asked
+            if (keep_averages_in_memory) {
+                // Could be executed concurrently, use mutex when in multithreading context
+                auto lock = (nthread > 0 ?
+                    std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
+
+                m_tr.add(id_type, tngal*tr);
+
+                ngal += tngal;
+                if (id_type == 0) {
+                    nqu += tngal;
+                } else {
+                    nsf += tngal;
+                }
+            }
+
+            // Store individual values if asked
+            if (keep_individuals_in_memory) {
+                // Could be executed concurrently, but never at the same 'iter'.
+                // Therefore this is thread safe.
+                indiv_tr.safe[iter]       = tr;
+                indiv_id_mass.safe[iter]  = id_mass;
+                indiv_id_type.safe[iter]  = id_type;
+                indiv_id_disk.safe[iter]  = id_disk;
+                indiv_id_bulge.safe[iter] = id_bulge;
+                indiv_id_bt.safe[iter]    = id_bt;
+                indiv_ngal.safe[iter]     = tngal;
+                indiv_uv.safe[iter]       = rfuv;
+                indiv_vj.safe[iter]       = rfvj;
+                indiv_fdisk.safe(iter,_)  = fdisk;
+                indiv_fbulge.safe(iter,_) = fbulge;
             }
 
             // Now generate mocks and fit them
@@ -187,26 +254,18 @@ public :
 
             if (cache_available) {
                 // A cache is present and we can reuse it!
-                process_cached(id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
+                process_cached(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
             } else {
                 // No cached data, must recompute stuff
 
-                // Setup priors (if any)
-                set_priors(fdisk, fbulge);
-
                 // Do the fitting
-                do_fit(id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
+                do_fit(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
 
                 // Save things in the cache
                 if (write_cache) {
-                    // Compute actual UVJ colors
-                    double mbt = bt.safe[id_bt];
-                    double mbti = 1.0 - mbt;
-                    double rfu = egg_fu.safe[id_disk]*mbti + mbt*egg_fu.safe[id_bulge];
-                    double rfv = egg_fv.safe[id_disk]*mbti + mbt*egg_fv.safe[id_bulge];
-                    double rfj = egg_fj.safe[id_disk]*mbti + mbt*egg_fj.safe[id_bulge];
-                    double rfuv = -2.5*log10(rfu/rfv);
-                    double rfvj = -2.5*log10(rfv/rfj);
+                    // Could be executed concurrently, use mutex when in multithreading context
+                    auto lock = (nthread > 0 ?
+                        std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
 
                     fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
                     fitter_cache.update_elements("it",        id_type,      fits::at(iter));
@@ -250,10 +309,13 @@ public :
         // Start averaging
         initialize_redshift_bin(iz);
 
-        vec<1,metrics_set> ztr(ntz);
-        dndz.resize(ntz);
-        dndz_qu.resize(ntz);
-        dndz_sf.resize(ntz);
+        vec<1,metrics_set> ztr;
+        if (keep_averages_in_memory) {
+            ztr.resize(ntz);
+            dndz.resize(ntz);
+            dndz_qu.resize(ntz);
+            dndz_sf.resize(ntz);
+        }
 
         if (global_progress_bar) {
             pgi = progress_start(ntz);
@@ -294,15 +356,28 @@ public :
             }
 
             // Reset averages
-            m_tr.reset();
-            ngal = 0; nqu = 0; nsf = 0;
+            if (keep_averages_in_memory) {
+                m_tr.reset();
+                ngal = 0; nqu = 0; nsf = 0;
+            }
 
             // Pre-compute number of iterations
-            if (!single_pass) {
+            if (!single_pass || keep_individuals_in_memory) {
                 note("compute number of iterations...");
+                // Initialize to zero
                 niter = 0;
                 just_count = true;
+
+                // Disable multi-threading for this
+                uint_t onthread = nthread;
+                nthread = 0;
+
+                // Count number of iterations
                 generate(zf, dz);
+
+                // Reset multithreading to its original state
+                nthread = onthread;
+
                 note("done: ", niter);
             }
 
@@ -310,9 +385,9 @@ public :
             initialize_redshift_slice(itz);
 
             // Initialize cache
+            std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
+            std::string cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
             if (use_cache || write_cache) {
-                std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
-                std::string cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
                 cache_filename = "cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("cache file: ", cache_filename);
             }
@@ -328,6 +403,17 @@ public :
 
                     fitter_cache.close();
                     cache_available = false;
+                }
+            }
+
+            vec1s tbands(nband+1);
+            vec1f lambda(nband+1);
+            tbands[0] = selection_band;
+            lambda[0] = selection_filter.rlam;
+            if (nband > 0) {
+                tbands[1-_] = bands;
+                for (uint_t l : range(filters)) {
+                    lambda[l+1] = filters[l].rlam;
                 }
             }
 
@@ -354,16 +440,6 @@ public :
 
                 // Save meta data
                 fitter_cache.write_columns("m_grid", m, "bt_grid", bt);
-                vec1s tbands(nband+1);
-                vec1f lambda(nband+1);
-                tbands[0] = selection_band;
-                lambda[0] = selection_filter.rlam;
-                if (nband > 0) {
-                    tbands[1-_] = bands;
-                    for (uint_t l : range(filters)) {
-                        lambda[l+1] = filters[l].rlam;
-                    }
-                }
                 fitter_cache.write_columns("bands", tbands, "lambda", lambda);
 
                 // Let the fitter add its own data to the cache
@@ -374,8 +450,22 @@ public :
                 note("done.");
             }
 
+            // Initialize individual arrays
+            if (keep_individuals_in_memory) {
+                indiv_tr.resize(niter);
+                indiv_id_mass.resize(niter);
+                indiv_id_type.resize(niter);
+                indiv_id_disk.resize(niter);
+                indiv_id_bulge.resize(niter);
+                indiv_id_bt.resize(niter);
+                indiv_ngal.resize(niter);
+                indiv_uv.resize(niter);
+                indiv_vj.resize(niter);
+                indiv_fdisk.resize(niter,nband+1);
+                indiv_fbulge.resize(niter,nband+1);
+            }
+
             // Compute averages at that redshift
-            iter = 0;
             just_count = false;
             if (!global_progress_bar) {
                 pgi = progress_start(niter);
@@ -383,11 +473,35 @@ public :
             generate(zf, dz);
 
             // Average quantities and store
-            m_tr.normalize(ngal, nqu, nsf);
-            ztr[itz]     = m_tr;
-            dndz[itz]    = ngal/dz;
-            dndz_qu[itz] = nqu/dz;
-            dndz_sf[itz] = nsf/dz;
+            if (keep_averages_in_memory) {
+                m_tr.normalize(ngal, nqu, nsf);
+                ztr[itz]     = m_tr;
+                dndz[itz]    = ngal/dz;
+                dndz_qu[itz] = nqu/dz;
+                dndz_sf[itz] = nsf/dz;
+            }
+
+            // Write to disk the individual measurements
+            if (write_individuals) {
+                indiv_filename = "indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
+                note("individuals file: ", indiv_filename);
+
+                fits::write_table(indiv_filename,
+                    "e1_true", get_e1(indiv_tr),
+                    "e2_true", get_e2(indiv_tr),
+                    "r2_true", get_r2(indiv_tr),
+                    "im",      indiv_id_mass,
+                    "it",      indiv_id_type,
+                    "idisk",   indiv_id_disk,
+                    "ibulge",  indiv_id_bulge,
+                    "ngal",    indiv_ngal,
+                    "uv",      indiv_uv,
+                    "vj",      indiv_vj,
+                    "fdisk",   indiv_fdisk,
+                    "fbulge",  indiv_fbulge,
+                    "bands", tbands, "lambda", lambda, "m_grid", m, "bt_grid", bt
+                );
+            }
 
             // Store results from fitter
             finalize_redshift_slice(itz);
@@ -398,18 +512,22 @@ public :
         }
 
         // Average over N(z)
-        double ntot    = integrate(uzf, dndz);
-        double ntot_qu = integrate(uzf, dndz_qu);
-        double ntot_sf = integrate(uzf, dndz_sf);
-        m_tr = integrate(uzf, ztr, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
+        if (keep_averages_in_memory) {
+            double ntot    = integrate(uzf, dndz);
+            double ntot_qu = integrate(uzf, dndz_qu);
+            double ntot_sf = integrate(uzf, dndz_sf);
+            m_tr = integrate(uzf, ztr, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
 
-        // Save
-        to_fits("psf-mean-z"+to_string(iz)+"-tr.fits", m_tr,
-            uzf, dndz, dndz_qu, dndz_sf, ztr
-        );
+            // Save
+            if (write_averages) {
+                to_fits("psf-mean-z"+to_string(iz)+"-tr.fits", m_tr,
+                    uzf, dndz, dndz_qu, dndz_sf, ztr
+                );
+            }
 
-        // Save results from fitter
-        finalize_redshift_bin(iz, ntot, ntot_qu, ntot_sf);
+            // Save results from fitter
+            finalize_redshift_bin(iz, ntot, ntot_qu, ntot_sf);
+        }
 
         return true;
     }

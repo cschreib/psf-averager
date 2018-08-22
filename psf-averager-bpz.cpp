@@ -23,6 +23,10 @@ public :
 
     vec<1,metrics_set> zml, zma;
 
+    // Individuals
+    vec<2,metrics> indiv_ml;
+    vec2f indiv_chi2, indiv_zml;
+
     // BPZ PSF library
     vec1d bpz_q11, bpz_q12, bpz_q22;
 
@@ -39,20 +43,26 @@ public :
     uint_t nspiral = npos;
     uint_t nirregular = npos;
 
-    // Internal variables
-    vec1d pmodel;
-    vec1d prior;
-    vec1d tt_prior;
-    vec1d pz, pzc;
-    vec1d chi2_best;
-
-    vec1d wflux, rflux, weight;
-    vec2d wmodel;
-    vec1d wmm;
+    // Internal variables (constant per slice)
     vec2d tpl_flux;
 
-    vec1d zmeas_ml, zmeas_ma, cache_pmodel;
-    vec1u cache_bmodel;
+    // Internal variables (workspace)
+    struct workspace {
+        vec1d pmodel;
+        vec1d prior;
+        vec1d tt_prior;
+        vec1d pz, pzc;
+        vec1d chi2_best;
+
+        vec1d wflux, rflux, weight;
+        vec2d wmodel;
+        vec1d wmm;
+
+        vec1d zmeas_ml, zmeas_ma, cache_pmodel;
+        vec1u cache_bmodel;
+    };
+
+    workspace global;
 
     // Config
     double gauss_convolve = dnan;
@@ -247,7 +257,7 @@ public :
         }
     }
 
-    void set_priors(const vec1d& fdisk, const vec1d& fbulge) override {
+    void set_priors(workspace& w, const vec1d& fdisk, const vec1d& fbulge) {
         double mag = -2.5*log10(fdisk.safe[id_prior] + fbulge.safe[id_prior]) + 23.9;
 
         double momin;
@@ -299,7 +309,7 @@ public :
                 double val = (zfit.safe[iz] <= 0.1 || (zfit.safe[0] > 0.1 && iz == 0));
                 for (uint_t it : range(3)) {
                     uint_t im = iz*3 + it;
-                    tt_prior.safe[im] = val;
+                    w.tt_prior.safe[im] = val;
                 }
             }
         } else {
@@ -316,10 +326,10 @@ public :
                 double tprior = 0.0;
                 for (uint_t iz : range(nzfit)) {
                     uint_t im = iz*3 + tt;
-                    tt_prior.safe[im] = pow(zfit.safe[iz], alpha.safe[tt])
+                    w.tt_prior.safe[im] = pow(zfit.safe[iz], alpha.safe[tt])
                         *exp(-clamp(pow(zfit.safe[iz]/zm, alpha.safe[tt]), 0.0, 700.0));
 
-                    tprior += tt_prior.safe[im];
+                    tprior += w.tt_prior.safe[im];
                 }
 
                 double tprior2 = 0.0;
@@ -327,14 +337,14 @@ public :
                     uint_t im = iz*3 + tt;
 
                     // Normalize
-                    tt_prior.safe[im] /= tprior;
+                    w.tt_prior.safe[im] /= tprior;
 
                     if (!use_capak_library) {
                         // Clip low probability wings
-                        if (tt_prior.safe[im] < 1e-2/nzfit) {
-                            tt_prior.safe[im] = 0.0;
+                        if (w.tt_prior.safe[im] < 1e-2/nzfit) {
+                            w.tt_prior.safe[im] = 0.0;
                         } else {
-                            tprior2 += tt_prior.safe[im];
+                            tprior2 += w.tt_prior.safe[im];
                         }
                     }
                 }
@@ -344,7 +354,7 @@ public :
                         uint_t im = iz*3 + tt;
 
                         // Normalize again
-                        tt_prior.safe[im] /= tprior2;
+                        w.tt_prior.safe[im] /= tprior2;
                     }
                 }
             }
@@ -364,11 +374,11 @@ public :
             if (itm == 0 || tt0 == tt1) {
                 // Non-interpolated SEDs get priors from their class,
                 // and so do SEDs inteprolated in between two SEDs of the same class
-                prior.safe[im] = tt_prior.safe[iz*3 + tt0];
+                w.prior.safe[im] = w.tt_prior.safe[iz*3 + tt0];
             } else {
                 // SEDs interpolated between different classes get interpolated priors
                 double x = (itm+1.0)/(ninterp+1.0);
-                prior.safe[im] = tt_prior.safe[iz*3 + tt0]*(1.0-x) + x*tt_prior.safe[iz*3 + tt1];
+                w.prior.safe[im] = w.tt_prior.safe[iz*3 + tt0]*(1.0-x) + x*w.tt_prior.safe[iz*3 + tt1];
             }
         }
     }
@@ -380,16 +390,20 @@ public :
         metrics ml;
         metrics ml2;
         for (uint_t i : range(nmc)) {
-            uint_t iml = cache_bmodel.safe(i);
+            uint_t iml = w.cache_bmodel.safe(i);
             metrics tm(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
             ml  += tm;
             ml2 += sqr(tm);
+
+            if (keep_individuals_in_memory) {
+                indiv_ml.safe(iter,i) = tm;
+            }
         }
+
         ml /= nmc;
         ml2 /= nmc;
         ml2 = sqrt(ml2 - sqr(ml));
 
-        m_ml.add(id_type, tngal*ml);
 
         // Marginalization
         // ---------------
@@ -398,12 +412,21 @@ public :
         metrics ma2;
         for (uint_t im : range(nmodel)) {
             metrics tm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
-            ma  += cache_pmodel.safe[im]*tm;
-            ma2 += cache_pmodel.safe[im]*sqr(tm);
+            ma  += w.cache_pmodel.safe[im]*tm;
+            ma2 += w.cache_pmodel.safe[im]*sqr(tm);
         }
+
         ma2 = sqrt(ma2 - sqr(ma));
 
-        m_ma.add(id_type, tngal*ma);
+        // Store average values if asked
+        if (keep_averages_in_memory) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
+
+            m_ml.add(id_type, tngal*ml);
+            m_ma.add(id_type, tngal*ma);
+        }
 
         if (write_cache) {
             fitter_cache.update_elements("e1_bpz_ml",     ml.e1,  fits::at(iter));
@@ -424,33 +447,46 @@ public :
     void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
-        fitter_cache.read_elements("bmodel", cache_bmodel, fits::at(iter,_));
-        fitter_cache.read_elements("pmodel", cache_pmodel, fits::at(iter,_));
+        workspace local;
+        workspace& w = (nthread == 0 ? global : local);
 
-        compute_averages(iter, id_type, tngal);
+        fitter_cache.read_elements("bmodel", w.cache_bmodel, fits::at(iter,_));
+        fitter_cache.read_elements("pmodel", w.cache_pmodel, fits::at(iter,_));
+
+        compute_averages(iter, w, id_type, tngal);
     }
 
     void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
+        workspace local;
+        if (nthread > 0) {
+            reset_workspace(local);
+        }
+
+        workspace& w = (nthread == 0 ? global : local);
+
+        // Setup priors
+        set_priors(w, fdisk, fbulge);
+
         // Create noise-free photometry
         for (uint_t l : range(nband)) {
             double bftot = fdisk.safe[l+1] + fbulge.safe[l+1];
-            weight.safe[l] = 1.0/sqrt(phot_err2.safe[l] + sqr(bftot*rel_err));
-            rflux.safe[l] = wflux.safe[l] = bftot*weight.safe[l];
+            w.weight.safe[l] = 1.0/sqrt(phot_err2.safe[l] + sqr(bftot*rel_err));
+            w.rflux.safe[l] = w.wflux.safe[l] = bftot*w.weight.safe[l];
         }
 
         // Create models
         for (uint_t im : range(nmodel)) {
-            wmm.safe[im] = 0.0;
+            w.wmm.safe[im] = 0.0;
             for (uint_t l : range(nband)) {
-                wmodel.safe(im,l) = tpl_flux.safe(im,l)*weight.safe[l];
-                wmm.safe[im] += sqr(wmodel.safe(im,l));
+                w.wmodel.safe(im,l) = tpl_flux.safe(im,l)*w.weight.safe[l];
+                w.wmm.safe[im] += sqr(w.wmodel.safe(im,l));
             }
         }
 
         for (uint_t im : range(nmodel)) {
-            cache_pmodel.safe[im] = 0.0;
+            w.cache_pmodel.safe[im] = 0.0;
         }
 
         // Simulate redshift measurements
@@ -459,44 +495,44 @@ public :
             if (!no_noise) {
                 for (uint_t l : range(nband)) {
                     // In weighted units, the random perturbations have a sigma of unity
-                    rflux.safe[l] = wflux.safe[l] + mc.safe(i,l);
+                    w.rflux.safe[l] = w.wflux.safe[l] + mc.safe(i,l);
                 }
             }
 
             // Find best SED and z, and store chi2 to build p(z,SED)
             uint_t iml = npos;
-            chi2_best.safe[i] = finf;
+            w.chi2_best.safe[i] = finf;
             for (uint_t im : range(nmodel)) {
-                double* wm = &wmodel.safe(im,0);
-                double* wf = &rflux.safe[0];
+                double* wm = &w.wmodel.safe(im,0);
+                double* wf = &w.rflux.safe[0];
 
                 double wfm = 0.0;
                 for (uint_t l : range(nband)) {
                     wfm += wf[l]*wm[l];
                 }
 
-                double scale = wfm/wmm.safe[im];
+                double scale = wfm/w.wmm.safe[im];
 
                 double tchi2 = 0.0;
                 for (uint_t l : range(nband)) {
                     tchi2 += sqr(wf[l] - scale*wm[l]);
                 }
 
-                pmodel.safe[im] = tchi2;
+                w.pmodel.safe[im] = tchi2;
 
-                if (tchi2 < chi2_best.safe[i]) {
-                    chi2_best.safe[i] = tchi2;
+                if (tchi2 < w.chi2_best.safe[i]) {
+                    w.chi2_best.safe[i] = tchi2;
                     iml = im;
                 }
             }
 
             // Create likelihood, apply prior, and marginalize over SEDs to build p(z)
             for (uint_t iz : range(nzfit)) {
-                pz.safe[iz] = 0.0;
+                w.pz.safe[iz] = 0.0;
                 for (uint_t it : range(ntemplate)) {
                     uint_t im = iz*ntemplate + it;
-                    pmodel.safe[im] = exp(-0.5*(pmodel.safe[im] - chi2_best.safe[i]))*prior.safe[im];
-                    pz.safe[iz] += pmodel.safe[im];
+                    w.pmodel.safe[im] = exp(-0.5*(w.pmodel.safe[im] - w.chi2_best.safe[i]))*w.prior.safe[im];
+                    w.pz.safe[iz] += w.pmodel.safe[im];
                 }
             }
 
@@ -506,14 +542,14 @@ public :
                 // Convolve
                 uint_t i0 = iz > wconv ? iz - wconv : 0;
                 uint_t i1 = iz < nzfit-1-wconv ? iz + wconv : nzfit-1;
-                pzc.safe[iz] = 0.0;
+                w.pzc.safe[iz] = 0.0;
                 for (uint_t tiz : range(i0, i1+1)) {
                     uint_t iconv = (int_t(tiz)-int_t(iz)) + wconv;
-                    pzc.safe[iz] += pz.safe[tiz]*gconv.safe[iconv];
+                    w.pzc.safe[iz] += w.pz.safe[tiz]*gconv.safe[iconv];
                 }
 
-                if (pzc.safe[iz] > pmax) {
-                    pmax = pzc.safe[iz];
+                if (w.pzc.safe[iz] > pmax) {
+                    pmax = w.pzc.safe[iz];
                 }
             }
 
@@ -522,46 +558,51 @@ public :
             double tprob = 0.0;
             for (uint_t iz : range(nzfit)) {
                 // Clip
-                if (pzc.safe[iz] < 1e-2*pmax) {
-                    pzc.safe[iz] = 0;
+                if (w.pzc.safe[iz] < 1e-2*pmax) {
+                    w.pzc.safe[iz] = 0;
                 }
 
                 // Update the p(z,SED)
                 for (uint_t it : range(ntemplate)) {
                     uint_t im = iz*ntemplate + it;
 
-                    if (pz.safe[iz] > 0.0) {
-                        pmodel.safe[im] *= pzc.safe[iz]/pz.safe[iz];
+                    if (w.pz.safe[iz] > 0.0) {
+                        w.pmodel.safe[im] *= w.pzc.safe[iz]/w.pz.safe[iz];
                     }
 
-                    tprob += pmodel.safe[im];
+                    tprob += w.pmodel.safe[im];
                 }
             }
 
-            pmodel /= tprob;
+            w.pmodel /= tprob;
 
-            if (write_cache) {
-                zmeas_ml.safe[i] = zfit.safe[iml/ntemplate];
-                zmeas_ma.safe[i] = total(zfit*pzc)/total(pzc);
+            if (keep_individuals_in_memory) {
+                indiv_chi2.safe(iter,i) = w.chi2_best.safe[i];
+                indiv_zml.safe(iter,i) = zfit.safe[iml/ntemplate];
             }
 
-            cache_bmodel.safe[i] = iml;
-            cache_pmodel += pmodel;
+            if (write_cache) {
+                w.zmeas_ml.safe[i] = zfit.safe[iml/ntemplate];
+                w.zmeas_ma.safe[i] = total(zfit*w.pzc)/total(w.pzc);
+            }
+
+            w.cache_bmodel.safe[i] = iml;
+            w.cache_pmodel += w.pmodel;
         }
 
-        cache_pmodel /= nmc;
+        w.cache_pmodel /= nmc;
 
         if (write_cache) {
             if (cache_save_pmodel) {
-                fitter_cache.update_elements("pmodel", cache_pmodel, fits::at(iter,_));
+                fitter_cache.update_elements("pmodel", w.cache_pmodel, fits::at(iter,_));
             }
-            fitter_cache.update_elements("bmodel",    cache_bmodel, fits::at(iter,_));
-            fitter_cache.update_elements("best_chi2", chi2_best,    fits::at(iter,_));
-            fitter_cache.update_elements("zmeas_ml",  zmeas_ml,     fits::at(iter,_));
-            fitter_cache.update_elements("zmeas_ma",  zmeas_ma,     fits::at(iter,_));
+            fitter_cache.update_elements("bmodel",    w.cache_bmodel, fits::at(iter,_));
+            fitter_cache.update_elements("best_chi2", w.chi2_best,    fits::at(iter,_));
+            fitter_cache.update_elements("zmeas_ml",  w.zmeas_ml,     fits::at(iter,_));
+            fitter_cache.update_elements("zmeas_ma",  w.zmeas_ma,     fits::at(iter,_));
         }
 
-        compute_averages(id_type, tngal);
+        compute_averages(iter, w, id_type, tngal);
     }
 
     vec1d get_madau(double z, const vec1d& lam) const {
@@ -602,13 +643,38 @@ public :
     }
 
     void initialize_redshift_bin(uint_t iz) override {
-        zml.resize(uzf.size());
-        zma.resize(uzf.size());
+        if (keep_averages_in_memory) {
+            zml.resize(uzf.size());
+            zma.resize(uzf.size());
+        }
     }
 
     std::string make_cache_hash() override {
         return hash(use_capak_library, use_egg_library, use_noline_library,
             apply_igm, zfit, bpz_seds, ninterp, gauss_convolve, cache_save_pmodel);
+    }
+
+    void reset_workspace(workspace& w) {
+        w.pmodel.resize(nmodel);
+        w.prior.resize(nmodel);
+        w.tt_prior.resize(nzfit*3);
+        w.pz.resize(nzfit);
+        w.pzc.resize(nzfit);
+        w.chi2_best.resize(nmc);
+
+        w.wflux.resize(nband);
+        w.rflux.resize(nband);
+        w.weight.resize(nband);
+        w.wmodel.resize(nmodel, nband);
+        w.wmm.resize(nmodel);
+
+        w.cache_bmodel.resize(nmc);
+        w.cache_pmodel.resize(nmodel);
+
+        if (write_cache) {
+            w.zmeas_ml.resize(nmc);
+            w.zmeas_ma.resize(nmc);
+        }
     }
 
     void initialize_redshift_slice(uint_t itz) override {
@@ -687,29 +753,21 @@ public :
         }
 
         // Reset averages
-        m_ml.reset();
-        m_ma.reset();
+        if (keep_averages_in_memory) {
+            m_ml.reset();
+            m_ma.reset();
+        }
 
         // Create workspace
-        pmodel.resize(nmodel);
-        prior.resize(nmodel);
-        tt_prior.resize(nzfit*3);
-        pz.resize(nzfit);
-        pzc.resize(nzfit);
-        chi2_best.resize(nmc);
+        if (nthread == 0) {
+            reset_workspace(global);
+        }
 
-        wflux.resize(nband);
-        rflux.resize(nband);
-        weight.resize(nband);
-        wmodel.resize(nmodel, nband);
-        wmm.resize(nmodel);
-
-        cache_bmodel.resize(nmc);
-        cache_pmodel.resize(nmodel);
-
-        if (write_cache) {
-            zmeas_ml.resize(nmc);
-            zmeas_ma.resize(nmc);
+        // Initialize individual arrays
+        if (keep_individuals_in_memory) {
+            indiv_ml.resize(niter,nmc);
+            indiv_chi2.resize(niter,nmc);
+            indiv_zml.resize(niter,nmc);
         }
     }
 
@@ -740,13 +798,26 @@ public :
     }
 
     void finalize_redshift_slice(uint_t itz) override {
-        // Average quantities
-        m_ml.normalize(ngal, nqu, nsf);
-        m_ma.normalize(ngal, nqu, nsf);
+        if (keep_averages_in_memory) {
+            // Average quantities
+            m_ml.normalize(ngal, nqu, nsf);
+            m_ma.normalize(ngal, nqu, nsf);
 
-        // Store
-        zml[itz] = m_ml;
-        zma[itz] = m_ma;
+            // Store
+            zml[itz] = m_ml;
+            zma[itz] = m_ma;
+        }
+
+        if (write_individuals) {
+            // Write to disk the individual measurements
+            fits::update_table(indiv_filename,
+                "e1_obs",   get_e1(indiv_ml),
+                "e2_obs",   get_e2(indiv_ml),
+                "r2_obs",   get_r2(indiv_ml),
+                "chi2_obs", indiv_chi2,
+                "z_obs",    indiv_zml
+            );
+        }
     }
 
     void finalize_redshift_bin(uint_t iz, double ntot, double ntot_qu, double ntot_sf) override {
@@ -792,16 +863,19 @@ int phypp_main(int argc, char* argv[]) {
     bool apply_igm = true;
     bool force_true_z = false;
     bool no_noise = false;
-    bool write_cache = true;
-    bool use_cache = true;
+    bool write_cache = false;
+    bool use_cache = false;
     bool cache_save_pmodel = true;
+    bool write_individuals = false;
+    bool write_averages = true;
+    uint_t nthread = 0;
     uint_t iz = 5;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
         use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel, share_dir,
-        filter_db, psf_file, sed_dir
+        filter_db, psf_file, sed_dir, nthread, write_individuals, write_averages
     ));
 
     bpz_averager pavg;
@@ -822,6 +896,7 @@ int phypp_main(int argc, char* argv[]) {
     opts.bt_steps = 5;
     opts.logmass_max = 12.0;
     opts.seds_step = seds_step;
+    opts.nthread = nthread;
     pavg.initialize(opts);
 
     // Setup mock
@@ -832,6 +907,8 @@ int phypp_main(int argc, char* argv[]) {
     mopts.dz = dz;
     mopts.no_noise = no_noise;
     mopts.psf_file = psf_file;
+    mopts.write_individuals = write_individuals;
+    mopts.write_averages = write_averages;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting

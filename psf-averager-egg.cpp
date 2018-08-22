@@ -14,8 +14,6 @@ public :
     void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {}
 
-    void set_priors(const vec1d& fdisk, const vec1d& fbulge) override {}
-
     std::string make_cache_hash() override {
         return "";
     }
@@ -28,8 +26,12 @@ int phypp_main(int argc, char* argv[]) {
     double dz = 0.01;
     uint_t seds_step = 5;
     uint_t iz = 5;
+    uint_t nthread = 0;
+    bool write_individuals = false;
+    bool write_averages = true;
 
-    read_args(argc, argv, arg_list(maglim, selection_band, dz, seds_step, iz));
+    read_args(argc, argv, arg_list(maglim, selection_band, dz, seds_step, iz,
+        nthread, write_individuals, write_averages));
 
     egg_averager pavg;
     pavg.write_cache = false;
@@ -47,6 +49,7 @@ int phypp_main(int argc, char* argv[]) {
     opts.bt_steps = 5;
     opts.logmass_max = 12.0;
     opts.seds_step = seds_step;
+    opts.nthread = nthread;
     pavg.initialize(opts);
 
     // Setup mock
@@ -56,6 +59,8 @@ int phypp_main(int argc, char* argv[]) {
     mopts.dz = dz;
     mopts.no_noise = true;
     mopts.psf_file = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
+    mopts.write_individuals = write_individuals;
+    mopts.write_averages = write_averages;
     pavg.configure_mock(mopts);
 
     if (!pavg.average_redshift_bin(iz)) return 1;
