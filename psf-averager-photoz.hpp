@@ -180,113 +180,107 @@ public :
     void on_generated(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
-        const double ftot = fdisk.safe[0] + fbulge.safe[0];
+        if (just_count) {
+            // This is always single-threaded, no need to worry
+            ++niter;
+            return;
+        }
 
-        if (ftot >= flim) {
-            // We passed the magnitude cut!
+        // Compute true PSF moments
+        // ------------------------
 
-            if (just_count) {
-                // This is always single-threaded, no need to worry
-                ++niter;
-                return;
+        // Compute flux-weighted B/T
+        const double fpsf_bulge = egg_fvis.safe[id_bulge]*bt.safe[id_bt];
+        const double fpsf_disk = egg_fvis.safe[id_disk]*(1.0 - bt.safe[id_bt]);
+        const double fbtn = fpsf_bulge/(fpsf_disk + fpsf_bulge);
+        const double fbti = 1.0 - fbtn;
+
+        // Add up PSFs
+        metrics tr(
+            egg_q11.safe[id_disk]*fbti + egg_q11.safe[id_bulge]*fbtn,
+            egg_q12.safe[id_disk]*fbti + egg_q12.safe[id_bulge]*fbtn,
+            egg_q22.safe[id_disk]*fbti + egg_q22.safe[id_bulge]*fbtn
+        );
+
+        // Compute actual UVJ colors
+        double mbt = bt.safe[id_bt];
+        double mbti = 1.0 - mbt;
+        double rfu = egg_fu.safe[id_disk]*mbti + mbt*egg_fu.safe[id_bulge];
+        double rfv = egg_fv.safe[id_disk]*mbti + mbt*egg_fv.safe[id_bulge];
+        double rfj = egg_fj.safe[id_disk]*mbti + mbt*egg_fj.safe[id_bulge];
+        double rfuv = -2.5*log10(rfu/rfv);
+        double rfvj = -2.5*log10(rfv/rfj);
+
+        // Store average values if asked
+        if (keep_averages_in_memory) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
+
+            m_tr.add(id_type, tngal*tr);
+
+            ngal += tngal;
+            if (id_type == 0) {
+                nqu += tngal;
+            } else {
+                nsf += tngal;
             }
+        }
 
-            // Compute true PSF moments
-            // ------------------------
+        // Store individual values if asked
+        if (keep_individuals_in_memory) {
+            // Could be executed concurrently, but never at the same 'iter'.
+            // Therefore this is thread safe.
+            indiv_tr.safe[iter]       = tr;
+            indiv_id_mass.safe[iter]  = id_mass;
+            indiv_id_type.safe[iter]  = id_type;
+            indiv_id_disk.safe[iter]  = id_disk;
+            indiv_id_bulge.safe[iter] = id_bulge;
+            indiv_id_bt.safe[iter]    = id_bt;
+            indiv_ngal.safe[iter]     = tngal;
+            indiv_uv.safe[iter]       = rfuv;
+            indiv_vj.safe[iter]       = rfvj;
+            indiv_fdisk.safe(iter,_)  = fdisk;
+            indiv_fbulge.safe(iter,_) = fbulge;
+        }
 
-            // Compute flux-weighted B/T
-            const double fpsf_bulge = egg_fvis.safe[id_bulge]*bt.safe[id_bt];
-            const double fpsf_disk = egg_fvis.safe[id_disk]*(1.0 - bt.safe[id_bt]);
-            const double fbtn = fpsf_bulge/(fpsf_disk + fpsf_bulge);
-            const double fbti = 1.0 - fbtn;
+        // Now generate mocks and fit them
+        // -------------------------------
 
-            // Add up PSFs
-            metrics tr(
-                egg_q11.safe[id_disk]*fbti + egg_q11.safe[id_bulge]*fbtn,
-                egg_q12.safe[id_disk]*fbti + egg_q12.safe[id_bulge]*fbtn,
-                egg_q22.safe[id_disk]*fbti + egg_q22.safe[id_bulge]*fbtn
-            );
+        if (cache_available) {
+            // A cache is present and we can reuse it!
+            process_cached(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
+        } else {
+            // No cached data, must recompute stuff
 
-            // Compute actual UVJ colors
-            double mbt = bt.safe[id_bt];
-            double mbti = 1.0 - mbt;
-            double rfu = egg_fu.safe[id_disk]*mbti + mbt*egg_fu.safe[id_bulge];
-            double rfv = egg_fv.safe[id_disk]*mbti + mbt*egg_fv.safe[id_bulge];
-            double rfj = egg_fj.safe[id_disk]*mbti + mbt*egg_fj.safe[id_bulge];
-            double rfuv = -2.5*log10(rfu/rfv);
-            double rfvj = -2.5*log10(rfv/rfj);
+            // Do the fitting
+            do_fit(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
 
-            // Store average values if asked
-            if (keep_averages_in_memory) {
+            // Save things in the cache
+            if (write_cache) {
                 // Could be executed concurrently, use mutex when in multithreading context
                 auto lock = (nthread > 0 ?
-                    std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
+                    std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
 
-                m_tr.add(id_type, tngal*tr);
-
-                ngal += tngal;
-                if (id_type == 0) {
-                    nqu += tngal;
-                } else {
-                    nsf += tngal;
-                }
+                fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
+                fitter_cache.update_elements("it",        id_type,      fits::at(iter));
+                fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
+                fitter_cache.update_elements("ibulge",    id_bulge,     fits::at(iter));
+                fitter_cache.update_elements("ibt",       id_bt,        fits::at(iter));
+                fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
+                fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
+                fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
+                fitter_cache.update_elements("uv",        rfuv,         fits::at(iter));
+                fitter_cache.update_elements("vj",        rfvj,         fits::at(iter));
+                fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
+                fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
+                fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
+                fitter_cache.open(cache_filename);
             }
+        }
 
-            // Store individual values if asked
-            if (keep_individuals_in_memory) {
-                // Could be executed concurrently, but never at the same 'iter'.
-                // Therefore this is thread safe.
-                indiv_tr.safe[iter]       = tr;
-                indiv_id_mass.safe[iter]  = id_mass;
-                indiv_id_type.safe[iter]  = id_type;
-                indiv_id_disk.safe[iter]  = id_disk;
-                indiv_id_bulge.safe[iter] = id_bulge;
-                indiv_id_bt.safe[iter]    = id_bt;
-                indiv_ngal.safe[iter]     = tngal;
-                indiv_uv.safe[iter]       = rfuv;
-                indiv_vj.safe[iter]       = rfvj;
-                indiv_fdisk.safe(iter,_)  = fdisk;
-                indiv_fbulge.safe(iter,_) = fbulge;
-            }
-
-            // Now generate mocks and fit them
-            // -------------------------------
-
-            if (cache_available) {
-                // A cache is present and we can reuse it!
-                process_cached(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
-            } else {
-                // No cached data, must recompute stuff
-
-                // Do the fitting
-                do_fit(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
-
-                // Save things in the cache
-                if (write_cache) {
-                    // Could be executed concurrently, use mutex when in multithreading context
-                    auto lock = (nthread > 0 ?
-                        std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
-
-                    fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
-                    fitter_cache.update_elements("it",        id_type,      fits::at(iter));
-                    fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
-                    fitter_cache.update_elements("ibulge",    id_bulge,     fits::at(iter));
-                    fitter_cache.update_elements("ibt",       id_bt,        fits::at(iter));
-                    fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
-                    fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
-                    fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
-                    fitter_cache.update_elements("uv",        rfuv,         fits::at(iter));
-                    fitter_cache.update_elements("vj",        rfvj,         fits::at(iter));
-                    fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
-                    fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
-                    fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
-                    fitter_cache.open(cache_filename);
-                }
-            }
-
-            if (!global_progress_bar) {
-                progress(pgi);
-            }
+        if (!global_progress_bar) {
+            progress(pgi);
         }
     }
 
