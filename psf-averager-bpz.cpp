@@ -842,6 +842,7 @@ int phypp_main(int argc, char* argv[]) {
     std::string share_dir = "/home/cschreib/code/egg/share/";
     std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
     std::string sed_lib = "/home/cschreib/code/egg-analytic/share/opt_lib_fastpp_hd_noigm.fits";
+    std::string sed_imf = "chabrier";
     std::string psf_file  = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
     std::string sed_dir   = "/home/cschreib/programming/bpz-1.99.3/";
 
@@ -879,7 +880,8 @@ int phypp_main(int argc, char* argv[]) {
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
         use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel, share_dir,
-        filter_db, psf_file, sed_dir, nthread, write_individuals, write_averages, cache_id, sed_lib
+        filter_db, psf_file, sed_dir, nthread, write_individuals, write_averages, cache_id, sed_lib,
+        sed_imf
     ));
 
     bpz_averager pavg;
@@ -891,6 +893,7 @@ int phypp_main(int argc, char* argv[]) {
     opts.share_dir = share_dir;
     opts.filter_db = filter_db;
     opts.sed_lib = sed_lib;
+    opts.sed_lib_imf = sed_imf;
     opts.filter_flambda = true;
     opts.filter_photons = true;
     opts.trim_filters = true;
