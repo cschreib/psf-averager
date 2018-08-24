@@ -150,6 +150,9 @@ public :
         tsed_dir = sed_dir+tsed_dir;
 
         bpz_seds = file::list_files(tsed_dir, "*.sed");
+        if (bpz_seds.empty()) {
+            bpz_seds = file::list_files(tsed_dir, "*.dat");
+        }
 
         // Sort BPZ SEDs by color (red to blue)
         vec1d color(bpz_seds.size()); {
