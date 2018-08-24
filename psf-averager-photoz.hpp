@@ -13,6 +13,7 @@ struct mock_options {
     bool write_individuals = false;
     bool keep_averages_in_memory = false;
     bool write_averages = false;
+    std::string force_cache_id;
 };
 
 class psf_averager : public egg::generator {
@@ -72,6 +73,7 @@ public :
     bool write_cache = false;
     bool use_cache = false;
     bool cache_available = false;
+    std::string force_cache_id;
 
     // Individual measurements
     bool keep_individuals_in_memory = false;
@@ -91,6 +93,7 @@ public :
         write_individuals = opts.write_individuals;
         keep_averages_in_memory = opts.keep_averages_in_memory;
         write_averages = opts.write_averages;
+        force_cache_id = opts.force_cache_id;
 
         if (nthread > 1) {
             global_progress_bar = true;
@@ -380,7 +383,13 @@ public :
 
             // Initialize cache
             std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
-            std::string cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
+            std::string cache_id;
+            if (force_cache_id.empty()) {
+                cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
+            } else {
+                cache_id = force_cache_id;
+            }
+
             if (use_cache || write_cache) {
                 cache_filename = "cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("cache file: ", cache_filename);

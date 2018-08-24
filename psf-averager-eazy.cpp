@@ -1020,13 +1020,14 @@ int phypp_main(int argc, char* argv[]) {
     bool write_averages = true;
     uint_t nthread = 0;
     uint_t iz = 5;
+    std::string cache_id;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
-        nthread, write_individuals, write_averages
+        nthread, write_individuals, write_averages, cache_id
     ));
 
     eazy_averager pavg;
@@ -1060,6 +1061,7 @@ int phypp_main(int argc, char* argv[]) {
     mopts.psf_file = psf_file;
     mopts.write_individuals = write_individuals;
     mopts.write_averages = write_averages;
+    mopts.force_cache_id = cache_id;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting
