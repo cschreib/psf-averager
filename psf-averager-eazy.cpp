@@ -133,18 +133,23 @@ public :
         // List SEDs
         if (use_egg_library) {
             if (opts.use_eggpp_library) {
-                eazy_seds = sed_dir+"EGG++/"+file::list_files(sed_dir+"EGG++/", "*.sed");
+                sed_dir = sed_dir+"EGG++/";
+                eazy_seds = sed_dir+file::list_files(sed_dir, "*.sed");
             } else {
-                eazy_seds = sed_dir+"EGG/"+file::list_files(sed_dir+"EGG/", "*.dat");
+                sed_dir = sed_dir+"EGG/";
+                eazy_seds = sed_dir+file::list_files(sed_dir, "*.dat");
             }
+
             inplace_sort(eazy_seds);
+
+            phypp_check(!eazy_seds.empty(), "no SED found for fitting in ", sed_dir);
 
             if (egg_sed_step > 1) {
                 // Remove some SEDs to save time
                 vec1b keep(eazy_seds.size());
                 vec1s lib_sid(eazy_seds.size());
                 for (uint_t i : range(eazy_seds)) {
-                    lib_sid[i] = eazy_seds[i].substr((sed_dir+"EGG/egg-").size(), 5);
+                    lib_sid[i] = eazy_seds[i].substr((sed_dir+"egg-").size(), 5);
                 }
 
                 for (uint_t iuv : range(use.dims[0]))
@@ -160,6 +165,8 @@ public :
 
                 eazy_seds = eazy_seds[where(keep)];
             }
+
+            phypp_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
         } else {
             if (use_noline_library) {
                 eazy_seds = sed_dir + vec1s{
