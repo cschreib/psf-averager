@@ -12,6 +12,7 @@ struct fitter_options {
     bool apply_igm = true;
     bool use_noline_library = false;
     bool use_egg_library = false;
+    bool use_eggpp_library = false;
     uint_t egg_sed_step = 1;
     bool force_true_z = false;
     uint_t limited_set = 0;
@@ -122,16 +123,20 @@ public :
         zfit_base = opts.zfit_dz*dindgen(nzfit_base);
 
         // Setup EAzY library
-        make_sed_library();
+        make_sed_library(opts);
 
         // Read prior
         read_prior();
     }
 
-    void make_sed_library() {
+    void make_sed_library(const fitter_options& opts) {
         // List SEDs
         if (use_egg_library) {
-            eazy_seds = sed_dir+"EGG/"+file::list_files(sed_dir+"EGG/", "*.dat");
+            if (opts.use_eggpp_library) {
+                eazy_seds = sed_dir+"EGG++/"+file::list_files(sed_dir+"EGG++/", "*.dat");
+            } else {
+                eazy_seds = sed_dir+"EGG/"+file::list_files(sed_dir+"EGG/", "*.dat");
+            }
             inplace_sort(eazy_seds);
 
             if (egg_sed_step > 1) {
@@ -1015,6 +1020,7 @@ int phypp_main(int argc, char* argv[]) {
     bool no_noise = false;
     bool use_noline_library = false;
     bool use_egg_library = false;
+    bool use_eggpp_library = false;
     uint_t limited_set = 0;
     uint_t egg_sed_step = 1;
     bool write_cache = false;
@@ -1031,7 +1037,7 @@ int phypp_main(int argc, char* argv[]) {
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
-        nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf
+        nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library
     ));
 
     eazy_averager pavg;
@@ -1081,7 +1087,8 @@ int phypp_main(int argc, char* argv[]) {
     fopts.apply_igm = apply_igm;
     fopts.force_true_z = force_true_z;
     fopts.use_noline_library = use_noline_library;
-    fopts.use_egg_library = use_egg_library;
+    fopts.use_egg_library = use_egg_library || use_eggpp_library;
+    fopts.use_eggpp_library = use_eggpp_library;
     fopts.egg_sed_step = egg_sed_step;
     fopts.limited_set = limited_set;
     fopts.cache_save_pmodel = cache_save_pmodel;
