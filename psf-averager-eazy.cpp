@@ -133,7 +133,7 @@ public :
         // List SEDs
         if (use_egg_library) {
             if (opts.use_eggpp_library) {
-                eazy_seds = sed_dir+"EGG++/"+file::list_files(sed_dir+"EGG++/", "*.dat");
+                eazy_seds = sed_dir+"EGG++/"+file::list_files(sed_dir+"EGG++/", "*.sed");
             } else {
                 eazy_seds = sed_dir+"EGG/"+file::list_files(sed_dir+"EGG/", "*.dat");
             }
