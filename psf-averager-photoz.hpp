@@ -495,6 +495,7 @@ public :
                     "r2_true", get_r2(indiv_tr),
                     "im",      indiv_id_mass,
                     "it",      indiv_id_type,
+                    "ibt",     indiv_id_bt,
                     "idisk",   indiv_id_disk,
                     "ibulge",  indiv_id_bulge,
                     "ngal",    indiv_ngal,
