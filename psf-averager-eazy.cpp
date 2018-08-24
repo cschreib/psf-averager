@@ -962,7 +962,9 @@ public :
                 "e2_obs",   get_e2(indiv_ml),
                 "r2_obs",   get_r2(indiv_ml),
                 "chi2_obs", indiv_chi2,
-                "z_obs",    indiv_zml
+                "z_obs",    indiv_zml,
+                "z_grid",   zfit,
+                "sed_grid", eazy_seds
             );
         }
     }
