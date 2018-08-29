@@ -17,6 +17,7 @@ struct fitter_options {
     bool force_true_z = false;
     uint_t limited_set = 0;
     bool cache_save_pmodel = true;
+    bool indiv_save_coefs = false;
 };
 
 class eazy_averager : public psf_averager {
@@ -30,6 +31,8 @@ public :
     // Individuals
     vec<2,metrics> indiv_ml;
     vec2f indiv_chi2, indiv_zml;
+    vec3f indiv_coefs;
+    vec3u indiv_seds;
 
     // EAzY PSF library
     vec1d eazy_q11, eazy_q12, eazy_q22;
@@ -622,6 +625,30 @@ public :
             if (keep_individuals_in_memory) {
                 indiv_chi2.safe(iter,i) = w.chi2_best.safe[i];
                 indiv_zml.safe(iter,i) = zfit.safe[w.cache_bestz.safe[i]];
+
+                if (indiv_save_coefs) {
+                    if (limited_set > 0) {
+                        // Only store the non-zero coefs and SEDs (saves space)
+                        uint_t inz = 0;
+                        for (uint_t it : range(limited_set)) {
+                            while (inz < ntemplate && w.cache_bestc.safe(i,inz) == 0.0) {
+                                ++inz;
+                            }
+
+                            if (inz == ntemplate) break;
+
+                            indiv_seds(iter,i,it) = inz;
+                            indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,inz);
+
+                            ++inz;
+                        }
+                    } else {
+                        // Store all coefs
+                        for (uint_t it : range(ntemplate)) {
+                            indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,it);
+                        }
+                    }
+                }
             }
         }
 
@@ -927,6 +954,16 @@ public :
             indiv_ml.resize(niter,nmc);
             indiv_chi2.resize(niter,nmc);
             indiv_zml.resize(niter,nmc);
+
+            if (indiv_save_coefs) {
+                uint_t nsed = ntemplate;
+                if (limited_set > 0) {
+                    nsed = limited_set;
+                    indiv_seds.resize(niter,nmc,nsed);
+                }
+
+                indiv_coefs.resize(niter,nmc,nsed);
+            }
         }
     }
 
@@ -969,7 +1006,8 @@ public :
 
         if (write_individuals) {
             // Write to disk the individual measurements
-            fits::update_table(indiv_filename,
+            fits::table otbl(indiv_filename);
+            otbl.update_columns(
                 "e1_obs",   get_e1(indiv_ml),
                 "e2_obs",   get_e2(indiv_ml),
                 "r2_obs",   get_r2(indiv_ml),
@@ -978,6 +1016,13 @@ public :
                 "z_grid",   zfit,
                 "sed_grid", eazy_seds
             );
+
+            if (indiv_save_coefs) {
+                otbl.update_columns("coef_obs", indiv_coefs);
+                if (limited_set > 0) {
+                    otbl.update_columns("seds_obs", indiv_seds);
+                }
+            }
         }
     }
 
@@ -1035,6 +1080,7 @@ int phypp_main(int argc, char* argv[]) {
     bool cache_save_pmodel = true;
     bool write_individuals = false;
     bool write_averages = true;
+    bool indiv_save_coefs = false;
     uint_t nthread = 0;
     uint_t iz = 5;
     std::string cache_id;
