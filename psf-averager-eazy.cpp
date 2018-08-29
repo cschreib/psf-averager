@@ -85,6 +85,7 @@ public :
     bool use_noline_library = false;
     bool use_egg_library = false;
     bool cache_save_pmodel = true;
+    bool indiv_save_coefs = false;
     uint_t egg_sed_step = 1;
     uint_t limited_set = 0;
     double fit_tftol = 1e-4;
@@ -103,6 +104,7 @@ public :
         limited_set = opts.limited_set;
         fit_tftol = opts.fit_tftol;
         cache_save_pmodel = opts.cache_save_pmodel;
+        indiv_save_coefs = opts.indiv_save_coefs;
         sed_dir = opts.sed_dir;
 
         if (limited_set > 3) {
@@ -1090,7 +1092,8 @@ int phypp_main(int argc, char* argv[]) {
         seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
-        nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library
+        nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
+        indiv_save_coefs
     ));
 
     eazy_averager pavg;
@@ -1145,6 +1148,7 @@ int phypp_main(int argc, char* argv[]) {
     fopts.egg_sed_step = egg_sed_step;
     fopts.limited_set = limited_set;
     fopts.cache_save_pmodel = cache_save_pmodel;
+    fopts.indiv_save_coefs = indiv_save_coefs;
     fopts.sed_dir = sed_dir;
     pavg.configure_fitter(fopts);
 
