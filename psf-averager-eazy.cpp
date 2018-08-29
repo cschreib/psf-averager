@@ -13,7 +13,10 @@ struct fitter_options {
     bool use_noline_library = false;
     bool use_egg_library = false;
     bool use_eggpp_library = false;
+    bool add_high_ew_template = false;
     uint_t egg_sed_step = 1;
+    bool egg_sed_borders = false;
+    bool egg_sed_add_center = false;
     bool force_true_z = false;
     uint_t limited_set = 0;
     bool cache_save_pmodel = true;
@@ -87,6 +90,8 @@ public :
     bool cache_save_pmodel = true;
     bool indiv_save_coefs = false;
     uint_t egg_sed_step = 1;
+    bool egg_sed_borders = false;
+    bool egg_sed_add_center = false;
     uint_t limited_set = 0;
     double fit_tftol = 1e-4;
     std::string sed_dir;
@@ -101,6 +106,8 @@ public :
         use_noline_library = opts.use_noline_library;
         use_egg_library = opts.use_egg_library;
         egg_sed_step = opts.egg_sed_step;
+        egg_sed_borders = opts.egg_sed_borders;
+        egg_sed_add_center = opts.egg_sed_add_center;
         limited_set = opts.limited_set;
         fit_tftol = opts.fit_tftol;
         cache_save_pmodel = opts.cache_save_pmodel;
@@ -137,41 +144,74 @@ public :
     void make_sed_library(const fitter_options& opts) {
         // List SEDs
         if (use_egg_library) {
+            std::string tsed_dir;
             if (opts.use_eggpp_library) {
-                sed_dir = sed_dir+"EGG++/";
-                eazy_seds = sed_dir+file::list_files(sed_dir, "*.sed");
+                tsed_dir = sed_dir+"EGG++/";
+                eazy_seds = tsed_dir+file::list_files(tsed_dir, "*.sed");
             } else {
-                sed_dir = sed_dir+"EGG/";
-                eazy_seds = sed_dir+file::list_files(sed_dir, "*.dat");
+                tsed_dir = sed_dir+"EGG/";
+                eazy_seds = tsed_dir+file::list_files(tsed_dir, "*.dat");
             }
 
             inplace_sort(eazy_seds);
 
-            phypp_check(!eazy_seds.empty(), "no SED found for fitting in ", sed_dir);
+            phypp_check(!eazy_seds.empty(), "no SED found for fitting in ", tsed_dir);
 
-            if (egg_sed_step > 1) {
-                // Remove some SEDs to save time
+            vec1u suv(eazy_seds.size());
+            vec1u svj(eazy_seds.size());
+            for (uint_t i : range(eazy_seds)) {
+                std::string sid = eazy_seds[i].substr((tsed_dir+"egg-").size(), 5);
+                bool converted = from_string(sid.substr(0,2), suv[i]) &&
+                                 from_string(sid.substr(3,2), svj[i]);
+                phypp_check(converted, "could not read UVJ ids from ", sid, " (",
+                            sid.substr(0,2), ", ", sid.substr(3,2), ")");
+            }
+
+            if (egg_sed_borders) {
                 vec1b keep(eazy_seds.size());
-                vec1s lib_sid(eazy_seds.size());
+                vec1b center(eazy_seds.size());
                 for (uint_t i : range(eazy_seds)) {
-                    lib_sid[i] = eazy_seds[i].substr((sed_dir+"egg-").size(), 5);
-                }
-
-                for (uint_t iuv : range(use.dims[0]))
-                for (uint_t ivj : range(use.dims[1])) {
-                    std::string suv = align_right(to_string(iuv), 2, '0');
-                    std::string svj = align_right(to_string(ivj), 2, '0');
-                    std::string sid = suv+"-"+svj;
-                    uint_t i = where_first(lib_sid == sid);
-                    if (i != npos) {
-                        keep[i] = (iuv+ivj) % egg_sed_step == 0;
+                    vec1u iduv = where(suv == suv[i]);
+                    vec1u idvj = where(svj == svj[i]);
+                    if (suv[i] == max(suv[idvj]) || suv[i] == min(suv[idvj]) ||
+                        svj[i] == max(svj[iduv]) || svj[i] == min(svj[iduv])) {
+                        keep[i] = true;
+                    }
+                    if (egg_sed_add_center && suv[i] == median(suv[idvj])) {
+                        keep[i] = true;
+                        center[i] = true;
                     }
                 }
 
+                if (egg_sed_step > 1) {
+                    // Remove some SEDs to save time
+
+                    // Sort by angle for borders
+                    double muv = 0.5*(max(suv) + min(suv));
+                    double mvj = 0.5*(max(svj) + min(svj));
+                    vec1d th = atan2(suv - muv, svj - mvj);
+                    vec1u idc = where(keep && !center);
+                    idc = idc[sort(th[idc])];
+                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0;
+
+                    // Sort by VJ for center
+                    idc = where(keep && center);
+                    idc = idc[sort(svj[idc])];
+                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0;
+                }
+
                 eazy_seds = eazy_seds[where(keep)];
+                phypp_check(!eazy_seds.empty(), "no SED left after keeping border and skipping");
+
+            } else if (egg_sed_step > 1) {
+                // Remove some SEDs to save time
+                eazy_seds = eazy_seds[where((suv + svj) % egg_sed_step == 0)];
+                phypp_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
             }
 
-            phypp_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
+            if (opts.add_high_ew_template) {
+                eazy_seds.push_back(sed_dir+"eazy/erb2010_highEW.dat");
+            }
         } else {
             if (use_noline_library) {
                 eazy_seds = sed_dir+"eazy/" + vec1s{
@@ -1075,8 +1115,11 @@ int phypp_main(int argc, char* argv[]) {
     bool use_noline_library = false;
     bool use_egg_library = false;
     bool use_eggpp_library = false;
+    bool add_high_ew_template = false;
     uint_t limited_set = 0;
     uint_t egg_sed_step = 1;
+    bool egg_sed_borders = false;
+    bool egg_sed_add_center = false;
     bool write_cache = false;
     bool use_cache = false;
     bool cache_save_pmodel = true;
@@ -1093,7 +1136,7 @@ int phypp_main(int argc, char* argv[]) {
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
         nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
-        indiv_save_coefs
+        indiv_save_coefs, add_high_ew_template, egg_sed_borders, egg_sed_add_center
     ));
 
     eazy_averager pavg;
@@ -1149,6 +1192,9 @@ int phypp_main(int argc, char* argv[]) {
     fopts.limited_set = limited_set;
     fopts.cache_save_pmodel = cache_save_pmodel;
     fopts.indiv_save_coefs = indiv_save_coefs;
+    fopts.add_high_ew_template = add_high_ew_template;
+    fopts.egg_sed_borders = egg_sed_borders;
+    fopts.egg_sed_add_center = egg_sed_add_center;
     fopts.sed_dir = sed_dir;
     pavg.configure_fitter(fopts);
 
