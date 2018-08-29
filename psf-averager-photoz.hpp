@@ -47,6 +47,7 @@ public :
     bool just_count = false;
     uint_t niter = 0;
 
+    std::mutex pg_mutex;
     progress_t pgi;
 
     // Config
@@ -94,10 +95,6 @@ public :
         keep_averages_in_memory = opts.keep_averages_in_memory;
         write_averages = opts.write_averages;
         force_cache_id = opts.force_cache_id;
-
-        if (nthread > 1) {
-            global_progress_bar = true;
-        }
 
         if (write_individuals) {
             keep_individuals_in_memory = true;
@@ -283,6 +280,10 @@ public :
         }
 
         if (!global_progress_bar) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(pg_mutex) : std::unique_lock<std::mutex>());
+
             progress(pgi);
         }
     }
