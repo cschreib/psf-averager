@@ -842,12 +842,12 @@ public :
 
 int phypp_main(int argc, char* argv[]) {
     // External data
-    std::string share_dir = "/home/cschreib/code/egg/share/";
+    std::string share_dir = "/home/cschreib/code/egg-analytic/share/";
     std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
     std::string sed_lib = "/home/cschreib/code/egg-analytic/share/opt_lib_fastpp_hd_noigm.fits";
     std::string sed_imf = "chabrier";
     std::string psf_file  = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
-    std::string sed_dir   = "/home/cschreib/programming/bpz-1.99.3/";
+    std::string sed_dir   = "/home/cschreib/code/euclid_psf/psf-averager/seds/bpz/";
 
     // Survey definition
     double maglim = 24.5;
