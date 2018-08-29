@@ -38,8 +38,8 @@ public :
     vec1d mono_lam, mono_q11, mono_q12, mono_q22, mono_w;
 
     // EGG PSF library
-    vec2d egg_q11, egg_q12, egg_q22;
-    vec2d egg_fu, egg_fv, egg_fj, egg_fvis;
+    vec1d egg_q11, egg_q12, egg_q22;
+    vec1d egg_fu, egg_fv, egg_fj, egg_fvis;
 
     // Internal variables
     vec2d mc;
@@ -153,21 +153,31 @@ public :
         phypp_check(read_filter("2mass-J", rest_filter_j),
             "could not find rest-frame filter J, aborting");
 
-        egg_fu.resize(use.dims);
-        egg_fv.resize(use.dims);
-        egg_fj.resize(use.dims);
-        for (uint_t iuv : range(use.dims[0]))
-        for (uint_t ivj : range(use.dims[1])) {
-            if (!use(iuv, ivj)) continue;
-
-            vec1d tlam = lam(iuv,ivj,_);
-            vec1d tsed = sed(iuv,ivj,_);
-
+        auto compute_uvj = [&](uint_t ised, const vec1d& tlam, vec1d tsed) {
             tsed = lsun2uJy(0.0, 1.0, tlam, tsed);
 
-            egg_fu(iuv,ivj) = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
-            egg_fv(iuv,ivj) = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
-            egg_fj(iuv,ivj) = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
+            egg_fu[ised] = sed2flux(rest_filter_u.lam, rest_filter_u.res, tlam, tsed);
+            egg_fv[ised] = sed2flux(rest_filter_v.lam, rest_filter_v.res, tlam, tsed);
+            egg_fj[ised] = sed2flux(rest_filter_j.lam, rest_filter_j.res, tlam, tsed);
+        };
+
+        if (single_sed_library) {
+            egg_fu.resize(single_use.size());
+            egg_fv.resize(single_use.size());
+            egg_fj.resize(single_use.size());
+            for (uint_t ised : range(single_use)) {
+                if (!single_use[ised]) continue;
+                compute_uvj(ised, single_lam(ised,_), single_sed(ised,_));
+            }
+        } else {
+            egg_fu.resize(use.size());
+            egg_fv.resize(use.size());
+            egg_fj.resize(use.size());
+            for (uint_t iuv : range(use.dims[0]))
+            for (uint_t ivj : range(use.dims[1])) {
+                if (!use(iuv, ivj)) continue;
+                compute_uvj(iuv*use.dims[1]+ivj, lam(iuv,ivj,_), sed(iuv,ivj,_));
+            }
         }
     }
 
@@ -327,18 +337,7 @@ public :
             double zf = uzf.safe[itz];
 
             // Compute PSF moments for each template in the library
-            egg_q11.resize(use.dims);
-            egg_q12.resize(use.dims);
-            egg_q22.resize(use.dims);
-            egg_fvis.resize(use.dims);
-
-            for (uint_t iuv : range(use.dims[0]))
-            for (uint_t ivj : range(use.dims[1])) {
-                if (!use(iuv, ivj)) continue;
-
-                vec1d tlam = lam(iuv,ivj,_);
-                vec1d tsed = sed(iuv,ivj,_);
-
+            auto set_moments = [&](uint_t ised, vec1d tlam, vec1d tsed) {
                 if (!naive_igm) {
                     apply_madau_igm(zf, tlam, tsed);
                 }
@@ -346,11 +345,34 @@ public :
                 tsed = lsun2uJy(zf, 1.0, tlam, tsed);
                 tlam *= (1.0 + zf);
 
-                double fvis       = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
-                egg_q11(iuv,ivj)  = sed2flux(psf_filter.lam, psf_filter.res*mono_q11, tlam, tsed)/fvis;
-                egg_q12(iuv,ivj)  = sed2flux(psf_filter.lam, psf_filter.res*mono_q12, tlam, tsed)/fvis;
-                egg_q22(iuv,ivj)  = sed2flux(psf_filter.lam, psf_filter.res*mono_q22, tlam, tsed)/fvis;
-                egg_fvis(iuv,ivj) = fvis;
+                double fvis    = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
+                egg_q11[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q11, tlam, tsed)/fvis;
+                egg_q12[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q12, tlam, tsed)/fvis;
+                egg_q22[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q22, tlam, tsed)/fvis;
+                egg_fvis[ised] = fvis;
+            };
+
+            if (single_sed_library) {
+                egg_q11.resize(single_use.size());
+                egg_q12.resize(single_use.size());
+                egg_q22.resize(single_use.size());
+                egg_fvis.resize(single_use.size());
+
+                for (uint_t ised : range(single_use)) {
+                    if (!single_use[ised]) continue;
+                    set_moments(ised, single_lam(ised,_), single_sed(ised,_));
+                }
+            } else {
+                egg_q11.resize(use.size());
+                egg_q12.resize(use.size());
+                egg_q22.resize(use.size());
+                egg_fvis.resize(use.size());
+
+                for (uint_t iuv : range(use.dims[0]))
+                for (uint_t ivj : range(use.dims[1])) {
+                    if (!use(iuv,ivj)) continue;
+                    set_moments(iuv*use.dims[1]+ivj, lam(iuv,ivj,_), sed(iuv,ivj,_));
+                }
             }
 
             // Reset averages
