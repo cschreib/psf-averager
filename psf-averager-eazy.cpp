@@ -174,7 +174,7 @@ public :
             phypp_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
         } else {
             if (use_noline_library) {
-                eazy_seds = sed_dir + vec1s{
+                eazy_seds = sed_dir+"eazy/" + vec1s{
                     "EAZY_v1.1_noline/eazy_v1.1_sed1.dat",
                     "EAZY_v1.1_noline/eazy_v1.1_sed2.dat",
                     "EAZY_v1.1_noline/eazy_v1.1_sed3.dat",
@@ -186,7 +186,7 @@ public :
                     "erb2010_highEW.dat"
                 };
             } else {
-                eazy_seds = sed_dir + vec1s{
+                eazy_seds = sed_dir+"eazy/" + vec1s{
                     "EAZY_v1.1_lines/eazy_v1.1_sed1.dat",
                     "EAZY_v1.1_lines/eazy_v1.1_sed2.dat",
                     "EAZY_v1.1_lines/eazy_v1.1_sed3.dat",
@@ -1050,7 +1050,7 @@ int phypp_main(int argc, char* argv[]) {
     std::string sed_lib = "/home/cschreib/code/egg-analytic/share/opt_lib_fastpp_hd_noigm.fits";
     std::string sed_imf = "chabrier";
     std::string psf_file  = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
-    std::string sed_dir   = "/home/cschreib/programming/eazy-photoz/templates/";
+    std::string sed_dir   = "/home/cschreib/code/euclid_psf/psf-averager/seds/";
 
     // Survey definition
     double maglim = 24.5;
