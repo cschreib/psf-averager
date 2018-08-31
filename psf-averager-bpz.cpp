@@ -24,8 +24,8 @@ public :
     vec<1,metrics_set> zml, zma;
 
     // Individuals
-    vec<2,metrics> indiv_ml;
-    vec2f indiv_chi2, indiv_zml;
+    vec<2,metrics> indiv_ml, indiv_ma;
+    vec2f indiv_chi2, indiv_zml, indiv_zma;
 
     // BPZ PSF library
     vec1d bpz_q11, bpz_q12, bpz_q22;
@@ -58,7 +58,8 @@ public :
         vec2d wmodel;
         vec1d wmm;
 
-        vec1d zmeas_ml, zmeas_ma, cache_pmodel;
+        vec1d zmeas_ml, zmeas_ma;
+        vec2d cache_pmodel;
         vec1u cache_bmodel;
     };
 
@@ -413,12 +414,23 @@ public :
 
         metrics ma;
         metrics ma2;
-        for (uint_t im : range(nmodel)) {
-            metrics tm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
-            ma  += w.cache_pmodel.safe[im]*tm;
-            ma2 += w.cache_pmodel.safe[im]*sqr(tm);
+        for (uint_t i : range(nmc)) {
+            metrics tm;
+            for (uint_t im : range(nmodel)) {
+                metrics ttm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
+                tm += w.cache_pmodel.safe(i,im)*ttm;
+            }
+
+            ma  += tm;
+            ma2 += sqr(tm);
+
+            if (keep_individuals_in_memory) {
+                indiv_ma.safe(iter,i) = tm;
+            }
         }
 
+        ma /= nmc;
+        ma2 /= nmc;
         ma2 = sqrt(ma2 - sqr(ma));
 
         // Store average values if asked
@@ -454,7 +466,7 @@ public :
         workspace& w = (nthread == 0 ? global : local);
 
         fitter_cache.read_elements("bmodel", w.cache_bmodel, fits::at(iter,_));
-        fitter_cache.read_elements("pmodel", w.cache_pmodel, fits::at(iter,_));
+        fitter_cache.read_elements("pmodel", w.cache_pmodel, fits::at(iter,_,_));
 
         compute_averages(iter, w, id_type, tngal);
     }
@@ -488,12 +500,12 @@ public :
             }
         }
 
-        for (uint_t im : range(nmodel)) {
-            w.cache_pmodel.safe[im] = 0.0;
-        }
-
         // Simulate redshift measurements
         for (uint_t i : range(nmc)) {
+            for (uint_t im : range(nmodel)) {
+                w.cache_pmodel.safe(i,im) = 0.0;
+            }
+
             // Create noisy photometry
             if (!no_noise) {
                 for (uint_t l : range(nband)) {
@@ -579,25 +591,31 @@ public :
 
             w.pmodel /= tprob;
 
+            double zma = total(zfit*w.pzc)/total(w.pzc);
+
             if (keep_individuals_in_memory) {
                 indiv_chi2.safe(iter,i) = w.chi2_best.safe[i];
                 indiv_zml.safe(iter,i) = zfit.safe[iml/ntemplate];
+                indiv_zma.safe(iter,i) = zma;
             }
 
             if (write_cache) {
                 w.zmeas_ml.safe[i] = zfit.safe[iml/ntemplate];
-                w.zmeas_ma.safe[i] = total(zfit*w.pzc)/total(w.pzc);
+                w.zmeas_ma.safe[i] = zma;
             }
 
             w.cache_bmodel.safe[i] = iml;
-            w.cache_pmodel += w.pmodel;
+
+            for (uint_t im : range(nmodel)) {
+                w.cache_pmodel.safe(i,im) = w.pmodel.safe[im];
+            }
         }
 
         w.cache_pmodel /= nmc;
 
         if (write_cache) {
             if (cache_save_pmodel) {
-                fitter_cache.update_elements("pmodel", w.cache_pmodel, fits::at(iter,_));
+                fitter_cache.update_elements("pmodel", w.cache_pmodel, fits::at(iter,_,_));
             }
             fitter_cache.update_elements("bmodel",    w.cache_bmodel, fits::at(iter,_));
             fitter_cache.update_elements("best_chi2", w.chi2_best,    fits::at(iter,_));
@@ -672,7 +690,7 @@ public :
         w.wmm.resize(nmodel);
 
         w.cache_bmodel.resize(nmc);
-        w.cache_pmodel.resize(nmodel);
+        w.cache_pmodel.resize(nmc, nmodel);
 
         if (write_cache) {
             w.zmeas_ml.resize(nmc);
@@ -769,8 +787,10 @@ public :
         // Initialize individual arrays
         if (keep_individuals_in_memory) {
             indiv_ml.resize(niter,nmc);
+            indiv_ma.resize(niter,nmc);
             indiv_chi2.resize(niter,nmc);
             indiv_zml.resize(niter,nmc);
+            indiv_zma.resize(niter,nmc);
         }
     }
 
@@ -817,8 +837,12 @@ public :
                 "e1_obs",   get_e1(indiv_ml),
                 "e2_obs",   get_e2(indiv_ml),
                 "r2_obs",   get_r2(indiv_ml),
+                "e1_obsm",  get_e1(indiv_ma),
+                "e2_obsm",  get_e2(indiv_ma),
+                "r2_obsm",  get_r2(indiv_ma),
                 "chi2_obs", indiv_chi2,
                 "z_obs",    indiv_zml,
+                "z_obsm",   indiv_zma,
                 "z_grid",   zfit,
                 "sed_grid", bpz_seds
             );
