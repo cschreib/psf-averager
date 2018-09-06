@@ -66,8 +66,10 @@ public :
     struct workspace {
         vec1d prior;                 // [nzfit]
         vec2d chi2;                  // [nmc,nzfit]
-        vec1d pz;                   // [nzfit]
+        vec1d pz;                    // [nzfit]
         vec1d chi2_best;             // [nmc]
+        vec1d z_obs;                 // [nmc]
+        vec1d z_obsm;                // [nmc]
 
         vec1d wflux, rflux, weight;  // [nband]
         vec2d wmodel;                // [ntemplate,nband]
@@ -398,18 +400,34 @@ public :
         }
 
         if (write_cache) {
-            fitter_cache.update_elements("e1_eazy_ml",     ml.e1,  fits::at(iter));
-            fitter_cache.update_elements("e2_eazy_ml",     ml.e2,  fits::at(iter));
-            fitter_cache.update_elements("r2_eazy_ml",     ml.r2,  fits::at(iter));
-            fitter_cache.update_elements("e1_eazy_ma",     ma.e1,  fits::at(iter));
-            fitter_cache.update_elements("e2_eazy_ma",     ma.e2,  fits::at(iter));
-            fitter_cache.update_elements("r2_eazy_ma",     ma.r2,  fits::at(iter));
-            fitter_cache.update_elements("e1_eazy_ml_err", ml2.e1, fits::at(iter));
-            fitter_cache.update_elements("e2_eazy_ml_err", ml2.e2, fits::at(iter));
-            fitter_cache.update_elements("r2_eazy_ml_err", ml2.r2, fits::at(iter));
-            fitter_cache.update_elements("e1_eazy_ma_err", ma2.e1, fits::at(iter));
-            fitter_cache.update_elements("e2_eazy_ma_err", ma2.e2, fits::at(iter));
-            fitter_cache.update_elements("r2_eazy_ma_err", ma2.r2, fits::at(iter));
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
+
+            fitter_cache.update_elements("chi2_obs", w.chi2_best,   fits::at(iter,_));
+            fitter_cache.update_elements("best_z",   w.cache_bestz, fits::at(iter,_));
+            fitter_cache.update_elements("z_obs",    w.z_obs,       fits::at(iter,_));
+            fitter_cache.update_elements("z_obsm",   w.z_obsm,      fits::at(iter,_));
+            if (cache_save_pmodel) {
+                fitter_cache.update_elements("best_coef", w.cache_bestc, fits::at(iter,_,_));
+                fitter_cache.update_elements("pz_coef",   w.cache_pzc,   fits::at(iter,_,_));
+                if (limited_set > 0) {
+                    fitter_cache.update_elements("pz_sed", w.cache_pzs, fits::at(iter,_,_));
+                }
+            }
+
+            fitter_cache.update_elements("e1_obs",      ml.e1,  fits::at(iter));
+            fitter_cache.update_elements("e2_obs",      ml.e2,  fits::at(iter));
+            fitter_cache.update_elements("r2_obs",      ml.r2,  fits::at(iter));
+            fitter_cache.update_elements("e1_obsm",     ma.e1,  fits::at(iter));
+            fitter_cache.update_elements("e2_obsm",     ma.e2,  fits::at(iter));
+            fitter_cache.update_elements("r2_obsm",     ma.r2,  fits::at(iter));
+            fitter_cache.update_elements("e1_obs_err",  ml2.e1, fits::at(iter));
+            fitter_cache.update_elements("e2_obs_err",  ml2.e2, fits::at(iter));
+            fitter_cache.update_elements("r2_obs_err",  ml2.r2, fits::at(iter));
+            fitter_cache.update_elements("e1_obsm_err", ma2.e1, fits::at(iter));
+            fitter_cache.update_elements("e2_obsm_err", ma2.e2, fits::at(iter));
+            fitter_cache.update_elements("r2_obsm_err", ma2.r2, fits::at(iter));
         }
     }
 
@@ -702,6 +720,9 @@ public :
 
         // Step 2): compute p(z)
         for (uint_t i : range(nmc)) {
+            w.z_obs.safe[i] = zfit.safe[w.cache_bestz.safe[i]];
+            w.z_obsm.safe[i] = 0.0;
+
             // Create likelihood, apply prior, and marginalize over SEDs to build p(z)
             double tprob = 0.0;
             for (uint_t iz : range(nzfit)) {
@@ -712,6 +733,7 @@ public :
             // Apply p(z) to cache_pzc
             for (uint_t iz : range(nzfit)) {
                 w.pz.safe[iz] /= tprob;
+                w.z_obsm.safe[i] += zfit.safe[iz]*w.pz.safe[iz];
 
                 for (uint_t it : range(nsed)) {
                     uint_t im = iz*nsed + it;
@@ -721,8 +743,8 @@ public :
 
             if (keep_individuals_in_memory) {
                 indiv_chi2.safe(iter,i) = w.chi2_best.safe[i];
-                indiv_zml.safe(iter,i)  = zfit.safe[w.cache_bestz.safe[i]];
-                indiv_zma.safe(iter,i)  = weighted_mean(zfit, w.pz);
+                indiv_zml.safe(iter,i)  = w.z_obs.safe[i];
+                indiv_zma.safe(iter,i)  = w.z_obsm.safe[i];
 
                 if (indiv_save_coefs) {
                     if (limited_set > 0) {
@@ -750,18 +772,6 @@ public :
                             indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,it);
                         }
                     }
-                }
-            }
-        }
-
-        if (write_cache) {
-            fitter_cache.update_elements("best_chi2", w.chi2_best,   fits::at(iter,_));
-            fitter_cache.update_elements("best_z",    w.cache_bestz, fits::at(iter,_));
-            if (cache_save_pmodel) {
-                fitter_cache.update_elements("best_coef", w.cache_bestc, fits::at(iter,_,_));
-                fitter_cache.update_elements("pz_coef",   w.cache_pzc,   fits::at(iter,_,_));
-                if (limited_set > 0) {
-                    fitter_cache.update_elements("pz_sed",    w.cache_pzs, fits::at(iter,_,_));
                 }
             }
         }
@@ -939,6 +949,8 @@ public :
         w.wmodel.resize(ntemplate, nband);
 
         w.cache_bestz.resize(nmc);
+        w.z_obs.resize(nmc);
+        w.z_obsm.resize(nmc);
         w.cache_bestc.resize(nmc,ntemplate);
         w.cache_pzc.resize(nmc,nzfit*nsed);
         if (limited_set > 0) {
@@ -1071,25 +1083,27 @@ public :
 
     void initialize_cache() override {
         // Initialize arrays
-        fitter_cache.allocate_column<float>("best_chi2",      niter, nmc);
-        fitter_cache.allocate_column<uint_t>("best_z",        niter, nmc);
+        fitter_cache.allocate_column<float>("chi2_obs",    niter, nmc);
+        fitter_cache.allocate_column<uint_t>("best_z",     niter, nmc);
+        fitter_cache.allocate_column<float>("z_obs",       niter, nmc);
+        fitter_cache.allocate_column<float>("z_obsm",      niter, nmc);
         if (cache_save_pmodel) {
             fitter_cache.allocate_column<float>("best_coef",  niter, nmc, ntemplate);
             fitter_cache.allocate_column<float>("pz",         niter, nzfit);
             fitter_cache.allocate_column<float>("pc",         niter, nmodel);
         }
-        fitter_cache.allocate_column<float>("e1_eazy_ml",     niter);
-        fitter_cache.allocate_column<float>("e2_eazy_ml",     niter);
-        fitter_cache.allocate_column<float>("r2_eazy_ml",     niter);
-        fitter_cache.allocate_column<float>("e1_eazy_ma",     niter);
-        fitter_cache.allocate_column<float>("e2_eazy_ma",     niter);
-        fitter_cache.allocate_column<float>("r2_eazy_ma",     niter);
-        fitter_cache.allocate_column<float>("e1_eazy_ml_err", niter);
-        fitter_cache.allocate_column<float>("e2_eazy_ml_err", niter);
-        fitter_cache.allocate_column<float>("r2_eazy_ml_err", niter);
-        fitter_cache.allocate_column<float>("e1_eazy_ma_err", niter);
-        fitter_cache.allocate_column<float>("e2_eazy_ma_err", niter);
-        fitter_cache.allocate_column<float>("r2_eazy_ma_err", niter);
+        fitter_cache.allocate_column<float>("e1_obs",      niter);
+        fitter_cache.allocate_column<float>("e2_obs",      niter);
+        fitter_cache.allocate_column<float>("r2_obs",      niter);
+        fitter_cache.allocate_column<float>("e1_obsm",     niter);
+        fitter_cache.allocate_column<float>("e2_obsm",     niter);
+        fitter_cache.allocate_column<float>("r2_obsm",     niter);
+        fitter_cache.allocate_column<float>("e1_obs_err",  niter);
+        fitter_cache.allocate_column<float>("e2_obs_err",  niter);
+        fitter_cache.allocate_column<float>("r2_obs_err",  niter);
+        fitter_cache.allocate_column<float>("e1_obsm_err", niter);
+        fitter_cache.allocate_column<float>("e2_obsm_err", niter);
+        fitter_cache.allocate_column<float>("r2_obsm_err", niter);
 
         // Save meta data
         fitter_cache.write_columns("z_grid", zfit, "sed_grid", eazy_seds);
@@ -1187,12 +1201,14 @@ int phypp_main(int argc, char* argv[]) {
     bool write_cache = false;
     bool use_cache = false;
     bool cache_save_pmodel = true;
-    bool write_individuals = false;
-    bool write_averages = true;
+    bool write_individuals = true;
+    bool write_averages = false;
     bool indiv_save_coefs = false;
     uint_t nthread = 0;
     uint_t iz = 5;
     std::string cache_id;
+    std::string cache_dir = "cache";
+    double prob_limit = 0.1;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
@@ -1200,7 +1216,8 @@ int phypp_main(int argc, char* argv[]) {
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
         nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
-        indiv_save_coefs, add_high_ew_template, egg_sed_borders, egg_sed_add_center
+        indiv_save_coefs, add_high_ew_template, egg_sed_borders, egg_sed_add_center,
+        cache_dir, prob_limit
     ));
 
     eazy_averager pavg;
@@ -1237,6 +1254,8 @@ int phypp_main(int argc, char* argv[]) {
     mopts.write_individuals = write_individuals;
     mopts.write_averages = write_averages;
     mopts.force_cache_id = cache_id;
+    mopts.cache_dir = cache_dir;
+    mopts.prob_limit = prob_limit;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting
