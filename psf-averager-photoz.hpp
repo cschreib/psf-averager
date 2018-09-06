@@ -14,6 +14,8 @@ struct mock_options {
     bool keep_averages_in_memory = false;
     bool write_averages = false;
     std::string force_cache_id;
+    std::string cache_dir;
+    double prob_limit = 0.1;
 };
 
 class psf_averager : public egg::generator {
@@ -46,6 +48,7 @@ public :
 
     bool just_count = false;
     uint_t niter = 0;
+    double ngal_tot = 0.0;
 
     std::mutex pg_mutex;
     progress_t pgi;
@@ -59,6 +62,7 @@ public :
     double rel_err = dnan;
     std::string psf_file;
     filter_t psf_filter;
+    double prob_limit = 0.1;
 
     bool single_pass = false;
     bool global_progress_bar = false;
@@ -75,6 +79,7 @@ public :
     bool use_cache = false;
     bool cache_available = false;
     std::string force_cache_id;
+    std::string cache_dir;
 
     // Individual measurements
     bool keep_individuals_in_memory = false;
@@ -95,6 +100,9 @@ public :
         keep_averages_in_memory = opts.keep_averages_in_memory;
         write_averages = opts.write_averages;
         force_cache_id = opts.force_cache_id;
+        cache_dir = file::directorize(opts.cache_dir);
+        prob_limit = opts.prob_limit;
+        if (prob_limit == 0.0) prob_limit = dnan;
 
         if (write_individuals) {
             keep_individuals_in_memory = true;
@@ -193,6 +201,7 @@ public :
         if (just_count) {
             // This is always single-threaded, no need to worry
             ++niter;
+            ngal_tot += tngal;
             return;
         }
 
@@ -382,21 +391,34 @@ public :
             }
 
             // Pre-compute number of iterations
-            if (!single_pass || keep_individuals_in_memory) {
+            if (!single_pass || keep_individuals_in_memory || is_finite(prob_limit)) {
                 note("compute number of iterations...");
+
                 // Initialize to zero
                 niter = 0;
+                ngal_tot = 0.0;
                 just_count = true;
+                use_prob_cut = false;
 
                 // Disable multi-threading for this
                 uint_t onthread = nthread;
                 nthread = 0;
 
-                // Count number of iterations
+                // Count number of iterations and total number density
                 generate(zf, dz);
+
+                if (is_finite(prob_limit)) {
+                    // Count again, now excluding low probability objects
+                    use_prob_cut = true;
+                    prob_cut = prob_limit*(ngal_tot/niter);
+                    niter = 0;
+                    ngal_tot = 0.0;
+                    generate(zf, dz);
+                }
 
                 // Reset multithreading to its original state
                 nthread = onthread;
+                just_count = false;
 
                 note("done: ", niter);
             }
@@ -414,7 +436,7 @@ public :
             }
 
             if (use_cache || write_cache) {
-                cache_filename = "cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
+                cache_filename = cache_dir+"cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("cache file: ", cache_filename);
             }
 
@@ -446,6 +468,7 @@ public :
             if (!cache_available && write_cache) {
                 note("creating cache on disk...");
 
+                file::mkdir(cache_dir);
                 file::remove(cache_filename);
                 fitter_cache.open(cache_filename);
 
@@ -492,7 +515,6 @@ public :
             }
 
             // Compute averages at that redshift
-            just_count = false;
             if (!global_progress_bar) {
                 pgi = progress_start(niter);
             }
@@ -509,7 +531,7 @@ public :
 
             // Write to disk the individual measurements
             if (write_individuals) {
-                indiv_filename = "indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
+                indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("individuals file: ", indiv_filename);
 
                 fits::write_table(indiv_filename,
