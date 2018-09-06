@@ -95,6 +95,8 @@ public :
     uint_t egg_sed_step = 1;
     bool egg_sed_borders = false;
     bool egg_sed_add_center = false;
+    bool add_high_ew_template = false;
+    uint_t ihew = npos;
     uint_t limited_set = 0;
     double fit_tftol = 1e-4;
     std::string sed_dir;
@@ -116,6 +118,7 @@ public :
         cache_save_pmodel = opts.cache_save_pmodel;
         indiv_save_coefs = opts.indiv_save_coefs;
         sed_dir = opts.sed_dir;
+        add_high_ew_template = opts.add_high_ew_template;
 
         if (limited_set > 3) {
             warning("'limited_set' can be at most equal to 3, set to zero to use all set");
@@ -213,6 +216,7 @@ public :
             }
 
             if (opts.add_high_ew_template) {
+                ihew = eazy_seds.size();
                 eazy_seds.push_back(sed_dir+"eazy/erb2010_highEW.dat");
             }
         } else {
@@ -616,11 +620,23 @@ public :
                     };
 
                     for (uint_t i1 : range(ntemplate)) {
+                        if (add_high_ew_template && i1 == ihew) continue;
+
                         try_fit_single(i1);
+
+                        if (add_high_ew_template) {
+                            try_fit_two(i1, ihew);
+                        }
 
                         if (limited_set > 1) {
                             for (uint_t i2 : range(i1+1, ntemplate)) {
+                                if (add_high_ew_template && i2 == ihew) continue;
+
                                 try_fit_two(i1, i2);
+
+                                if (add_high_ew_template) {
+                                    try_fit_three(i1, i2, ihew);
+                                }
 
                                 if (limited_set > 2) {
                                     for (uint_t i3 : range(i2+1, ntemplate)) {
