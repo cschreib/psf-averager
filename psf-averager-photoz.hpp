@@ -534,6 +534,7 @@ public :
                 indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("individuals file: ", indiv_filename);
 
+                file::mkdir(cache_dir);
                 fits::write_table(indiv_filename,
                     "e1_true", get_e1(indiv_tr),
                     "e2_true", get_e2(indiv_tr),
