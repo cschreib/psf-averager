@@ -3,7 +3,7 @@
 
 struct mock_options {
     double dz = 0.01;
-    uint_t nmc = 1000;
+    uint_t nmc = 200;
     uint_t seed = 42;
     vec1f depths;
     double min_mag_err = 0.05;
