@@ -835,7 +835,7 @@ public :
 
         if (write_individuals) {
             // Write to disk the individual measurements
-            fits::update_table otbl(indiv_filename);
+            fits::table otbl(indiv_filename);
             otbl.update_column("e1_obs",   get_e1(indiv_ml));
             otbl.update_column("e2_obs",   get_e2(indiv_ml));
             otbl.update_column("r2_obs",   get_r2(indiv_ml));
