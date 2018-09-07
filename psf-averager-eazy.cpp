@@ -1139,24 +1139,22 @@ public :
         if (write_individuals) {
             // Write to disk the individual measurements
             fits::table otbl(indiv_filename);
-            otbl.update_columns(
-                "e1_obs",   get_e1(indiv_ml),
-                "e2_obs",   get_e2(indiv_ml),
-                "r2_obs",   get_r2(indiv_ml),
-                "e1_obsm",  get_e1(indiv_ma),
-                "e2_obsm",  get_e2(indiv_ma),
-                "r2_obsm",  get_r2(indiv_ma),
-                "chi2_obs", indiv_chi2,
-                "z_obs",    indiv_zml,
-                "z_obsm",   indiv_zma,
-                "z_grid",   zfit,
-                "sed_grid", eazy_seds
-            );
+            otbl.update_column("e1_obs",   get_e1(indiv_ml));
+            otbl.update_column("e2_obs",   get_e2(indiv_ml));
+            otbl.update_column("r2_obs",   get_r2(indiv_ml));
+            otbl.update_column("e1_obsm",  get_e1(indiv_ma));
+            otbl.update_column("e2_obsm",  get_e2(indiv_ma));
+            otbl.update_column("r2_obsm",  get_r2(indiv_ma));
+            otbl.update_column("chi2_obs", indiv_chi2);
+            otbl.update_column("z_obs",    indiv_zml);
+            otbl.update_column("z_obsm",   indiv_zma);
+            otbl.update_column("z_grid",   zfit);
+            otbl.update_column("sed_grid", eazy_seds);
 
             if (indiv_save_coefs) {
-                otbl.update_columns("coef_obs", indiv_coefs);
+                otbl.update_column("coef_obs", indiv_coefs);
                 if (limited_set > 0) {
-                    otbl.update_columns("seds_obs", indiv_seds);
+                    otbl.update_column("seds_obs", indiv_seds);
                 }
             }
         }
