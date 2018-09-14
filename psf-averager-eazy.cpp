@@ -41,6 +41,9 @@ public :
     vec1d eazy_q11, eazy_q12, eazy_q22;
     vec1d eazy_fvis;
 
+    // EAzY SEDs
+    vec3f save_sed_eazy_fluxes; // [ntemplate,nzfit,nlam]
+
     // Fit models
     vec1s eazy_seds;
     vec1d zfit_base;
@@ -312,6 +315,11 @@ public :
         // Maximum likelihood
         // ------------------
 
+        vec2f osed;
+        if (save_seds) {
+            osed.resize(nmc, save_sed_lambda.size());
+        }
+
         metrics ml;
         metrics ml2;
         for (uint_t i : range(nmc)) {
@@ -338,11 +346,26 @@ public :
             if (keep_individuals_in_memory) {
                 indiv_ml.safe(iter,i) = tm;
             }
+
+            if (save_seds) {
+                for (uint_t it : range(ntemplate)) {
+                    double c = w.cache_bestc.safe(i,it);
+                    if (c > 0.0) {
+                        for (uint_t il : range(save_sed_lambda)) {
+                            osed(i,il) += c*save_sed_eazy_fluxes(it,iz,il);
+                        }
+                    }
+                }
+            }
         }
 
         ml /= nmc;
         ml2 /= nmc;
         ml2 = sqrt(ml2 - sqr(ml));
+
+        if (save_seds) {
+            fits::update_table("seds/sed_"+to_string(iter)+".fits", "sed_obs", osed);
+        }
 
 
         // Marginalization
@@ -1006,7 +1029,7 @@ public :
             compute_fluxes = true;
         }
 
-        if (compute_moments || compute_fluxes) {
+        if (compute_moments || compute_fluxes || save_seds) {
             for (uint_t it : range(ntemplate)) {
                 vec1d rlam, rsed;
                 ascii::read_table(eazy_seds[it], rlam, rsed);
@@ -1051,6 +1074,14 @@ public :
                             psf_filter.lam, psf_filter.res*mono_q22, olam, osed
                         )/fvis;
                         eazy_fvis.safe[iz*ntemplate+it] = fvis;
+                    }
+
+                    if (save_seds) {
+                        if (save_sed_eazy_fluxes.empty()) {
+                            save_sed_eazy_fluxes.resize(ntemplate,nzfit,save_sed_lambda.size());
+                        }
+
+                        save_sed_eazy_fluxes(it,iz,_) = interpolate(osed, olam, save_sed_lambda);
                     }
                 }
             }
@@ -1223,6 +1254,8 @@ int vif_main(int argc, char* argv[]) {
     std::string cache_id;
     std::string cache_dir = "cache";
     double prob_limit = 0.1;
+    bool save_seds = false;
+    uint_t mass_steps = 50;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
@@ -1231,7 +1264,7 @@ int vif_main(int argc, char* argv[]) {
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
         nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
         indiv_save_coefs, add_high_ew_template, egg_sed_borders, egg_sed_add_center,
-        cache_dir, prob_limit
+        cache_dir, prob_limit, save_seds, mass_steps
     ));
 
     eazy_averager pavg;
@@ -1250,7 +1283,7 @@ int vif_main(int argc, char* argv[]) {
     opts.selection_band = selection_band;
     opts.filters = filters;
     opts.maglim = maglim;
-    opts.logmass_steps = 50;
+    opts.logmass_steps = mass_steps;
     opts.bt_steps = 5;
     opts.logmass_max = 12.0;
     opts.seds_step = seds_step;
@@ -1270,6 +1303,7 @@ int vif_main(int argc, char* argv[]) {
     mopts.force_cache_id = cache_id;
     mopts.cache_dir = cache_dir;
     mopts.prob_limit = prob_limit;
+    mopts.save_seds = save_seds;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting

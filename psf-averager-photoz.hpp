@@ -13,9 +13,11 @@ struct mock_options {
     bool write_individuals = false;
     bool keep_averages_in_memory = false;
     bool write_averages = false;
+    bool save_seds = false;
     std::string force_cache_id;
     std::string cache_dir;
     double prob_limit = 0.1;
+    vec1d zb = {0.001, 0.418, 0.560, 0.678, 0.789, 0.900, 1.019, 1.155, 1.324, 1.576, 2.500};
 };
 
 class psf_averager : public egg::generator {
@@ -38,6 +40,10 @@ public :
 
     // Monochromatic PSF library
     vec1d mono_lam, mono_q11, mono_q12, mono_q22, mono_w;
+
+    // Observed SEDs
+    vec1f save_sed_lambda;     // [nlam]
+    vec2f save_sed_egg_fluxes; // [nsed,nlam]
 
     // EGG PSF library
     vec1d egg_q11, egg_q12, egg_q22;
@@ -86,6 +92,7 @@ public :
     bool write_individuals = false;
     bool keep_averages_in_memory = false;
     bool write_averages = false;
+    bool save_seds = false;
     std::string indiv_filename;
 
     psf_averager(const std::string& f) : egg::generator(), fitter(f) {}
@@ -93,6 +100,7 @@ public :
     void configure_mock(const mock_options& opts) {
         nband = filters.size();
         dz = opts.dz;
+        zb = opts.zb;
         no_noise = opts.no_noise;
         psf_file = opts.psf_file;
         keep_individuals_in_memory = opts.keep_individuals_in_memory;
@@ -103,6 +111,12 @@ public :
         cache_dir = file::directorize(opts.cache_dir);
         prob_limit = opts.prob_limit;
         if (prob_limit == 0.0) prob_limit = dnan;
+        save_seds = opts.save_seds;
+
+        if (save_seds) {
+            file::mkdir("seds/");
+            save_sed_lambda = rgen_step(0.2,1.2,0.001);
+        }
 
         if (write_individuals) {
             keep_individuals_in_memory = true;
@@ -263,6 +277,18 @@ public :
             indiv_fbulge.safe(iter,_) = fbulge;
         }
 
+        // Save SEDs if asked
+        if (save_seds) {
+            vec1f tsed = nm.safe[id_mass]*(
+                mbti*save_sed_egg_fluxes(id_disk,_) +
+                mbt*save_sed_egg_fluxes(id_bulge,_)
+            );
+
+            fits::write_table("seds/sed_"+to_string(iter)+".fits",
+                "lam", save_sed_lambda, "sed_true", tsed
+            );
+        }
+
         // Now generate mocks and fit them
         // -------------------------------
 
@@ -344,6 +370,8 @@ public :
             }
 
             double zf = uzf.safe[itz];
+            double df = lumdist(zf, cosmo);
+            const double ML_cor = e10(-interpolate({0.15,0.15,0.0,0.0,-0.6}, {0.0,0.45,1.3,6.0,8.0}, zf));
 
             // Compute PSF moments for each template in the library
             auto set_moments = [&](uint_t ised, vec1d tlam, vec1d tsed) {
@@ -351,8 +379,12 @@ public :
                     apply_madau_igm(zf, tlam, tsed);
                 }
 
-                tsed = lsun2uJy(zf, 1.0, tlam, tsed);
+                tsed = lsun2uJy(zf, df, tlam, tsed);
                 tlam *= (1.0 + zf);
+
+                if (save_seds) {
+                    save_sed_egg_fluxes(ised,_) = ML_cor*interpolate(tsed, tlam, save_sed_lambda);
+                }
 
                 double fvis    = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
                 egg_q11[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q11, tlam, tsed)/fvis;
@@ -367,6 +399,10 @@ public :
                 egg_q22.resize(single_use.size());
                 egg_fvis.resize(single_use.size());
 
+                if (save_seds) {
+                    save_sed_egg_fluxes.resize(single_use.size(), save_sed_lambda.size());
+                }
+
                 for (uint_t ised : range(single_use)) {
                     if (!single_use[ised]) continue;
                     set_moments(ised, single_lam(ised,_), single_sed(ised,_));
@@ -376,6 +412,10 @@ public :
                 egg_q12.resize(use.size());
                 egg_q22.resize(use.size());
                 egg_fvis.resize(use.size());
+
+                if (save_seds) {
+                    save_sed_egg_fluxes.resize(use.size(), save_sed_lambda.size());
+                }
 
                 for (uint_t iuv : range(use.dims[0]))
                 for (uint_t ivj : range(use.dims[1])) {
@@ -530,8 +570,8 @@ public :
             }
 
             // Write to disk the individual measurements
+            indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
             if (write_individuals) {
-                indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("individuals file: ", indiv_filename);
 
                 file::mkdir(cache_dir);
