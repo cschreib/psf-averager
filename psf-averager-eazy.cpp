@@ -1258,6 +1258,7 @@ int vif_main(int argc, char* argv[]) {
     bool save_seds = false;
     uint_t mass_steps = 50;
     bool allbins = false;
+    bool global_progress_bar = false;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
@@ -1266,7 +1267,7 @@ int vif_main(int argc, char* argv[]) {
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
         nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
         indiv_save_coefs, add_high_ew_template, egg_sed_borders, egg_sed_add_center,
-        cache_dir, prob_limit, save_seds, mass_steps, nzsplit, allbins
+        cache_dir, prob_limit, save_seds, mass_steps, nzsplit, allbins, global_progress_bar
     ));
 
     eazy_averager pavg;
@@ -1307,6 +1308,7 @@ int vif_main(int argc, char* argv[]) {
     mopts.cache_dir = cache_dir;
     mopts.prob_limit = prob_limit;
     mopts.save_seds = save_seds;
+    mopts.global_progress_bar = global_progress_bar;
     pavg.configure_mock(mopts);
 
     // Setup redshift fitting

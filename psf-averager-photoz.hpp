@@ -19,6 +19,7 @@ struct mock_options {
     std::string cache_dir;
     double prob_limit = 0.1;
     vec1d zb = {0.001, 0.418, 0.560, 0.678, 0.789, 0.900, 1.019, 1.155, 1.324, 1.576, 2.500};
+    bool global_progress_bar = false;
 };
 
 class psf_averager : public egg::generator {
@@ -115,6 +116,7 @@ public :
         prob_limit = opts.prob_limit;
         if (prob_limit == 0.0) prob_limit = dnan;
         save_seds = opts.save_seds;
+        global_progress_bar = opts.global_progress_bar;
 
         if (save_seds) {
             file::mkdir("seds/");
