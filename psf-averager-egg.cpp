@@ -37,10 +37,12 @@ int vif_main(int argc, char* argv[]) {
     bool write_individuals = false;
     bool write_averages = true;
     std::string cache_id;
+    vec1d zb = {0.001, 0.418, 0.560, 0.678, 0.789, 0.900, 1.019, 1.155, 1.324, 1.576, 2.500};
+    vec1s filters;
 
     read_args(argc, argv, arg_list(maglim, selection_band, dz, seds_step, iz,
         nthread, write_individuals, write_averages, cache_id, share_dir, filter_db,
-        sed_lib, sed_imf, psf_file));
+        sed_lib, sed_imf, psf_file, zb, filters));
 
     egg_averager pavg;
     pavg.write_cache = false;
@@ -61,18 +63,21 @@ int vif_main(int argc, char* argv[]) {
     opts.logmass_max = 12.0;
     opts.seds_step = seds_step;
     opts.nthread = nthread;
+    opts.filters = filters;
     pavg.initialize(opts);
 
     // Setup mock
     mock_options mopts;
     mopts.nmc = 1;
     mopts.min_mag_err = 0.0;
+    mopts.zb = zb;
     mopts.dz = dz;
     mopts.no_noise = true;
     mopts.psf_file = psf_file;
     mopts.write_individuals = write_individuals;
     mopts.write_averages = write_averages;
     mopts.force_cache_id = cache_id;
+    mopts.depths = replicate(29.0, filters.size());
     pavg.configure_mock(mopts);
 
     if (!pavg.average_redshift_bin(iz)) return 1;
