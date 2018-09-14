@@ -107,7 +107,7 @@ public :
             ninterp = 0;
         }
 
-        phypp_check(is_any_of(opts.prior_filter, bands),
+        vif_check(is_any_of(opts.prior_filter, bands),
             "prior filter is not in the filter list ('", opts.prior_filter, "' not found')");
         id_prior = where_first(opts.prior_filter == bands) + 1;
 
@@ -125,7 +125,7 @@ public :
             wconv = npt/2;
 
             // This is a gaussian trucated between -9*sigma and +9*sigma
-            vec1d kz = opts.zfit_dz*(findgen(npt)-wconv);
+            vec1d kz = opts.zfit_dz*(indgen<double>(npt)-wconv);
             gconv = integrate_gauss(kz-opts.zfit_dz/2.0, kz+opts.zfit_dz/2.0, 0.0, gauss_convolve);
             gconv /= total(gconv);
         }
@@ -865,7 +865,7 @@ public :
     }
 };
 
-int phypp_main(int argc, char* argv[]) {
+int vif_main(int argc, char* argv[]) {
     // External data
     std::string share_dir = "/home/cschreib/code/egg-analytic/share/";
     std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";

@@ -113,7 +113,7 @@ public :
 
         // Square of photometric error (Gaussian additive component)
         phot_err2 = sqr(mag2uJy(opts.depths)/10.0);
-        phypp_check(phot_err2.size() == nband, "mismatch between filters (", nband, ") and depths (",
+        vif_check(phot_err2.size() == nband, "mismatch between filters (", nband, ") and depths (",
             phot_err2.size(), ")");
 
         // Relative error on flux, sets minimum uncertainties
@@ -154,11 +154,11 @@ public :
 
         // Compute actual rest-frame colors of EGG SEDs.
         filter_t rest_filter_u, rest_filter_v, rest_filter_j;
-        phypp_check(read_filter("maiz-U",  rest_filter_u),
+        vif_check(read_filter("maiz-U",  rest_filter_u),
             "could not find rest-frame filter U, aborting");
-        phypp_check(read_filter("maiz-V",  rest_filter_v),
+        vif_check(read_filter("maiz-V",  rest_filter_v),
             "could not find rest-frame filter V, aborting");
-        phypp_check(read_filter("2mass-J", rest_filter_j),
+        vif_check(read_filter("2mass-J", rest_filter_j),
             "could not find rest-frame filter J, aborting");
 
         auto compute_uvj = [&](uint_t ised, const vec1d& tlam, vec1d tsed) {
@@ -321,7 +321,7 @@ public :
 
     bool average_redshift_bin(uint_t iz) {
         uint_t ntz = max(floor((zb[iz+1]-zb[iz])/dz), 1);
-        uzf = zb[iz] + dz*dindgen(ntz);
+        uzf = zb[iz] + dz*indgen<double>(ntz);
 
         // Start averaging
         initialize_redshift_bin(iz);

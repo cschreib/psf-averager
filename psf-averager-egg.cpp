@@ -19,7 +19,7 @@ public :
     }
 };
 
-int phypp_main(int argc, char* argv[]) {
+int vif_main(int argc, char* argv[]) {
     // External data
     std::string share_dir = "/home/cschreib/code/egg-analytic/share/";
     std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";

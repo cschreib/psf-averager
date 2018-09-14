@@ -127,7 +127,7 @@ public :
 
         prior_filter = opts.prior_filter;
         prior_file = opts.prior_file;
-        phypp_check(is_any_of(prior_filter, bands),
+        vif_check(is_any_of(prior_filter, bands),
             "prior filter is not in the filter list ('", prior_filter, "' not found')");
         id_prior = where_first(prior_filter == bands) + 1;
 
@@ -138,7 +138,7 @@ public :
 
         // Setup redshift grid
         nzfit_base = ceil(opts.zfit_max/opts.zfit_dz);
-        zfit_base = opts.zfit_dz*dindgen(nzfit_base);
+        zfit_base = opts.zfit_dz*indgen<double>(nzfit_base);
 
         // Setup EAzY library
         make_sed_library(opts);
@@ -161,7 +161,7 @@ public :
 
             inplace_sort(eazy_seds);
 
-            phypp_check(!eazy_seds.empty(), "no SED found for fitting in ", tsed_dir);
+            vif_check(!eazy_seds.empty(), "no SED found for fitting in ", tsed_dir);
 
             vec1u suv(eazy_seds.size());
             vec1u svj(eazy_seds.size());
@@ -169,7 +169,7 @@ public :
                 std::string sid = eazy_seds[i].substr((tsed_dir+"egg-").size(), 5);
                 bool converted = from_string(sid.substr(0,2), suv[i]) &&
                                  from_string(sid.substr(3,2), svj[i]);
-                phypp_check(converted, "could not read UVJ ids from ", sid, " (",
+                vif_check(converted, "could not read UVJ ids from ", sid, " (",
                             sid.substr(0,2), ", ", sid.substr(3,2), ")");
             }
 
@@ -198,21 +198,21 @@ public :
                     vec1d th = atan2(suv - muv, svj - mvj);
                     vec1u idc = where(keep && !center);
                     idc = idc[sort(th[idc])];
-                    keep[idc] = uindgen(idc.size()) % egg_sed_step == 0;
+                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0;
 
                     // Sort by VJ for center
                     idc = where(keep && center);
                     idc = idc[sort(svj[idc])];
-                    keep[idc] = uindgen(idc.size()) % egg_sed_step == 0;
+                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0;
                 }
 
                 eazy_seds = eazy_seds[where(keep)];
-                phypp_check(!eazy_seds.empty(), "no SED left after keeping border and skipping");
+                vif_check(!eazy_seds.empty(), "no SED left after keeping border and skipping");
 
             } else if (egg_sed_step > 1) {
                 // Remove some SEDs to save time
                 eazy_seds = eazy_seds[where((suv + svj) % egg_sed_step == 0)];
-                phypp_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
+                vif_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
             }
 
             if (opts.add_high_ew_template) {
@@ -266,11 +266,11 @@ public :
             std::string line;
             std::getline(in, line);
             vec1s spl = split_any_of(line, " ");
-            phypp_check(spl.size() > 2 && spl[0] == "#" && spl[1] == "z",
+            vif_check(spl.size() > 2 && spl[0] == "#" && spl[1] == "z",
                 "ill-formed header line for prior file");
 
             spl = spl[2-_];
-            phypp_check(count(!from_string(spl, prior_mag)) == 0, "could not read prior magnitudes "
+            vif_check(count(!from_string(spl, prior_mag)) == 0, "could not read prior magnitudes "
                 "(", spl, ")");
         }
 
@@ -1175,7 +1175,7 @@ public :
     }
 };
 
-int phypp_main(int argc, char* argv[]) {
+int vif_main(int argc, char* argv[]) {
     // External data
     std::string share_dir = "/home/cschreib/code/egg-analytic/share/";
     std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";

@@ -1,5 +1,3 @@
-
-
 // Average PSF metrics
 struct metrics {
     double q11 = 0, q12 = 0, q22 = 0;
