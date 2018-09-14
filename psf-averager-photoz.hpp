@@ -3,6 +3,7 @@
 
 struct mock_options {
     double dz = 0.01;
+    uint_t nzsplit = 0;
     uint_t nmc = 200;
     uint_t seed = 42;
     vec1f depths;
@@ -62,6 +63,7 @@ public :
     // Config
     vec1d zb = {0.001, 0.418, 0.560, 0.678, 0.789, 0.900, 1.019, 1.155, 1.324, 1.576, 2.500};
     double dz = 0.01;
+    uint_t nzsplit = 0;
     seed_t seed = make_seed(42);
     uint_t nband = npos, nmc = npos;
     vec1f phot_err2;
@@ -100,6 +102,7 @@ public :
     void configure_mock(const mock_options& opts) {
         nband = filters.size();
         dz = opts.dz;
+        nzsplit = opts.nzsplit;
         zb = opts.zb;
         no_noise = opts.no_noise;
         psf_file = opts.psf_file;
@@ -346,8 +349,15 @@ public :
     virtual void initialize_cache() {}
 
     bool average_redshift_bin(uint_t iz) {
-        uint_t ntz = max(floor((zb[iz+1]-zb[iz])/dz), 1);
-        uzf = zb[iz] + dz*indgen<double>(ntz);
+        uint_t ntz;
+        if (nzsplit != 0) {
+            ntz = nzsplit;
+            dz = (zb[iz+1] - zb[iz])/nzsplit;
+            uzf = zb[iz] + dz*(0.5 + indgen<double>(nzsplit));
+        } else {
+            ntz = max(floor((zb[iz+1]-zb[iz])/dz), 1);
+            uzf = zb[iz] + dz*indgen<double>(ntz);
+        }
 
         // Start averaging
         initialize_redshift_bin(iz);
@@ -467,7 +477,8 @@ public :
             initialize_redshift_slice(itz);
 
             // Initialize cache
-            std::string zid = replace(to_string(format::fixed(format::precision(zf, 2))), ".", "p");
+            uint_t precision = ceil(max(-log10(dz), 2.0));
+            std::string zid = replace(to_string(format::fixed(format::precision(zf, precision))), ".", "p");
             std::string cache_id;
             if (force_cache_id.empty()) {
                 cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
@@ -589,7 +600,7 @@ public :
                     "vj",      indiv_vj,
                     "fdisk",   indiv_fdisk,
                     "fbulge",  indiv_fbulge,
-                    "bands", tbands, "lambda", lambda, "m_grid", m, "bt_grid", bt
+                    "bands", tbands, "lambda", lambda, "m_grid", m, "bt_grid", bt, "z_true", zf
                 );
             }
 

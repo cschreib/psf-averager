@@ -885,6 +885,7 @@ int vif_main(int argc, char* argv[]) {
     uint_t nmc = 200;
     uint_t ninterp = 2;
     double dz = 0.01;
+    uint_t nzsplit = 0;
     uint_t seds_step = 5;
     double zfit_max = 7.0;
     double zfit_dz = 0.01;
@@ -911,7 +912,7 @@ int vif_main(int argc, char* argv[]) {
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
         use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel, share_dir,
         filter_db, psf_file, sed_dir, nthread, write_individuals, write_averages, cache_id, sed_lib,
-        sed_imf, cache_dir, prob_limit
+        sed_imf, cache_dir, prob_limit, nzsplit
     ));
 
     bpz_averager pavg;
@@ -943,6 +944,7 @@ int vif_main(int argc, char* argv[]) {
     mopts.nmc = nmc;
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
+    mopts.nzsplit = nzsplit;
     mopts.no_noise = no_noise;
     mopts.psf_file = psf_file;
     mopts.write_individuals = write_individuals;

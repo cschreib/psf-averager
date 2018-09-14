@@ -1225,6 +1225,7 @@ int vif_main(int argc, char* argv[]) {
     double min_mag_err = 0.0;
     uint_t nmc = 200;
     double dz = 0.01;
+    uint_t nzsplit = 0;
     uint_t seds_step = 5;
     double zfit_max = 7.0;
     double zfit_dz = 0.01;
@@ -1256,6 +1257,7 @@ int vif_main(int argc, char* argv[]) {
     double prob_limit = 0.1;
     bool save_seds = false;
     uint_t mass_steps = 50;
+    bool allbins = false;
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
@@ -1264,7 +1266,7 @@ int vif_main(int argc, char* argv[]) {
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
         nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
         indiv_save_coefs, add_high_ew_template, egg_sed_borders, egg_sed_add_center,
-        cache_dir, prob_limit, save_seds, mass_steps
+        cache_dir, prob_limit, save_seds, mass_steps, nzsplit, allbins
     ));
 
     eazy_averager pavg;
@@ -1296,6 +1298,7 @@ int vif_main(int argc, char* argv[]) {
     mopts.nmc = nmc;
     mopts.min_mag_err = min_mag_err;
     mopts.dz = dz;
+    mopts.nzsplit = nzsplit;
     mopts.no_noise = no_noise;
     mopts.psf_file = psf_file;
     mopts.write_individuals = write_individuals;
@@ -1330,11 +1333,13 @@ int vif_main(int argc, char* argv[]) {
     pavg.configure_fitter(fopts);
 
     // Average PSF metrics
-    // for (uint_t iz : range(pavg.zb)) {
-    //     if (!pavg.average_redshift_bin(iz)) continue;
-    // }
-
-    if (!pavg.average_redshift_bin(iz)) return 1;
+    if (allbins) {
+        for (uint_t tiz : range(pavg.zb)) {
+            if (!pavg.average_redshift_bin(tiz)) return 1;
+        }
+    } else {
+        if (!pavg.average_redshift_bin(iz)) return 1;
+    }
 
     return 0;
 }
