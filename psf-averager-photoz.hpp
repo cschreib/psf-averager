@@ -145,8 +145,6 @@ public :
             nmc = 1;
         }
 
-        mc = randomn(seed, nmc, nband);
-
         // Set PSF filter
         psf_filter = selection_filter;
 
@@ -564,6 +562,9 @@ public :
                 indiv_fdisk.resize(niter,nband+1);
                 indiv_fbulge.resize(niter,nband+1);
             }
+
+            // Initialize random numbers
+            mc = randomn(seed, nmc, nband);
 
             // Compute averages at that redshift
             if (!global_progress_bar) {
