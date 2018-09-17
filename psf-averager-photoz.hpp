@@ -348,6 +348,20 @@ public :
 
     virtual void initialize_cache() {}
 
+    vec1d resample_sed(const vec1d& tlam, const vec1d& tsed) const {
+        const vec1d& blam = save_sed_lambda;
+        double dl = blam[1] - blam[0];
+        uint_t npt = blam.size();
+        vec1d fobs(npt);
+        for (uint_t l : range(npt)) {
+            if (blam.safe[l]-dl/2.0 > tlam.front() && blam.safe[l]+dl/2.0 < tlam.back()) {
+                fobs.safe[l] = integrate(tlam, tsed, blam.safe[l]-dl/2.0, blam.safe[l]+dl/2.0)/dl;
+            }
+        }
+
+        return fobs;
+    }
+
     bool average_redshift_bin(uint_t iz) {
         uint_t ntz;
         if (nzsplit != 0) {
@@ -393,7 +407,7 @@ public :
                 tlam *= (1.0 + zf);
 
                 if (save_seds) {
-                    save_sed_egg_fluxes(ised,_) = ML_cor*interpolate(tsed, tlam, save_sed_lambda);
+                    save_sed_egg_fluxes(ised,_) = ML_cor*resample_sed(tlam, tsed);
                 }
 
                 double fvis    = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);

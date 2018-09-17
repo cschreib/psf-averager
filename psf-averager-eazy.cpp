@@ -1081,7 +1081,7 @@ public :
                             save_sed_eazy_fluxes.resize(ntemplate,nzfit,save_sed_lambda.size());
                         }
 
-                        save_sed_eazy_fluxes(it,iz,_) = interpolate(osed, olam, save_sed_lambda);
+                        save_sed_eazy_fluxes(it,iz,_) = resample_sed(olam, osed);
                     }
                 }
             }
