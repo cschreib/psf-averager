@@ -120,7 +120,7 @@ public :
 
         if (save_seds) {
             file::mkdir("seds/");
-            save_sed_lambda = rgen_step(0.2,1.2,0.001);
+            save_sed_lambda = rgen_step(0.1,2.0,0.001);
         }
 
         if (write_individuals) {
