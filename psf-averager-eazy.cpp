@@ -25,15 +25,7 @@ struct fitter_options {
 
 class eazy_averager : public psf_averager {
 public :
-    // Averages
-    metrics_set m_ml; // maximum likelihood
-    metrics_set m_ma; // marginalization
-
-    vec<1,metrics_set> zml, zma;
-
     // Individuals
-    vec<2,metrics> indiv_ml, indiv_ma;
-    vec2f indiv_chi2, indiv_zml, indiv_zma;
     vec3f indiv_coefs;
     vec3u indiv_seds;
 
@@ -64,15 +56,13 @@ public :
     vec2d prior_table;      // [nmag,nzfit]
     vec2d tpl_flux;         // [nmodel,nband]
     vec2d tpl_err;          // [nzfit,nband]
+    fits::table* fitter_cache_ptr = nullptr;
 
     // Internal variables (workspace)
     struct workspace {
         vec1d prior;                 // [nzfit]
         vec2d chi2;                  // [nmc,nzfit]
         vec1d pz;                    // [nzfit]
-        vec1d chi2_best;             // [nmc]
-        vec1d z_obs;                 // [nmc]
-        vec1d z_obsm;                // [nmc]
 
         vec1d wflux, rflux, weight;  // [nband]
         vec2d wmodel;                // [ntemplate,nband]
@@ -132,7 +122,7 @@ public :
         prior_file = opts.prior_file;
         vif_check(is_any_of(prior_filter, bands),
             "prior filter is not in the filter list ('", prior_filter, "' not found')");
-        id_prior = where_first(prior_filter == bands) + 1;
+        id_prior = where_first(prior_filter == bands);
 
         // Read template error file
         ascii::read_table(opts.template_error, tpl_error_x, tpl_error_y);
@@ -291,8 +281,8 @@ public :
         prior_table_base(_,where(zfit_base < min(tmp_z) || zfit_base > max(tmp_z))) = 1.0;
     }
 
-    void set_priors(workspace& w, const vec1d& fdisk, const vec1d& fbulge) {
-        double mag = -2.5*log10(fdisk.safe[id_prior] + fbulge.safe[id_prior]) + 23.9;
+    void set_priors(workspace& w, const vec1d& ftot) {
+        double mag = -2.5*log10(ftot.safe[id_prior]) + 23.9;
 
         uint_t imag = lower_bound(prior_mag, mag);
         if (imag == npos) {
@@ -311,171 +301,8 @@ public :
         }
     }
 
-    void compute_averages(uint_t iter, const workspace& w, uint_t id_type, double tngal) {
-        // Maximum likelihood
-        // ------------------
-
-        vec2f osed;
-        if (save_seds) {
-            osed.resize(nmc, save_sed_lambda.size());
-        }
-
-        metrics ml;
-        metrics ml2;
-        for (uint_t i : range(nmc)) {
-            uint_t iz = w.cache_bestz.safe[i];
-
-            // Compute flux-weighted average moments for this model
-            double q11 = 0.0, q12 = 0.0, q22 = 0.0;
-            double wtot = 0.0;
-            for (uint_t it : range(ntemplate)) {
-                uint_t im = iz*ntemplate + it;
-
-                double tw = w.cache_bestc.safe(i,it)*eazy_fvis.safe[im];
-                wtot += tw;
-
-                q11 += tw*eazy_q11.safe[im];
-                q12 += tw*eazy_q12.safe[im];
-                q22 += tw*eazy_q22.safe[im];
-            }
-
-            metrics tm(q11/wtot, q12/wtot, q22/wtot);
-            ml  += tm;
-            ml2 += sqr(tm);
-
-            if (keep_individuals_in_memory) {
-                indiv_ml.safe(iter,i) = tm;
-            }
-
-            if (save_seds) {
-                for (uint_t it : range(ntemplate)) {
-                    double c = w.cache_bestc.safe(i,it);
-                    if (c > 0.0) {
-                        for (uint_t il : range(save_sed_lambda)) {
-                            osed(i,il) += c*save_sed_eazy_fluxes(it,iz,il);
-                        }
-                    }
-                }
-            }
-        }
-
-        ml /= nmc;
-        ml2 /= nmc;
-        ml2 = sqrt(ml2 - sqr(ml));
-
-        if (save_seds) {
-            fits::update_table("seds/sed_"+to_string(iter)+".fits", "sed_obs", osed);
-        }
-
-
-        // Marginalization
-        // ---------------
-
-        metrics ma;
-        metrics ma2;
-        for (uint_t i : range(nmc)) {
-            // Compute flux-weighted average moments for this model
-            double q11 = 0.0, q12 = 0.0, q22 = 0.0;
-            double wtot = 0.0;
-
-            for (uint_t iz : range(nzfit)) {
-                if (limited_set > 0) {
-                    for (uint_t it : range(nsed)) {
-                        uint_t imm = iz*nsed      + it;
-                        uint_t im  = iz*ntemplate + w.cache_pzs.safe(i,imm);
-
-                        double tw = w.cache_pzc.safe(i,imm)*eazy_fvis.safe[im];
-                        wtot += tw;
-
-                        q11 += tw*eazy_q11.safe[im];
-                        q12 += tw*eazy_q12.safe[im];
-                        q22 += tw*eazy_q22.safe[im];
-                    }
-                } else {
-                    for (uint_t it : range(ntemplate)) {
-                        uint_t im = iz*ntemplate + it;
-
-                        double tw = w.cache_pzc.safe(i,im)*eazy_fvis.safe[im];
-                        wtot += tw;
-
-                        q11 += tw*eazy_q11.safe[im];
-                        q12 += tw*eazy_q12.safe[im];
-                        q22 += tw*eazy_q22.safe[im];
-                    }
-                }
-            }
-
-            metrics tm(q11, q12, q22);
-            ma  += tm;
-            ma2 += sqr(tm);
-
-            if (keep_individuals_in_memory) {
-                indiv_ma.safe(iter,i) = tm;
-            }
-        }
-
-        ma2 = sqrt(ma2 - sqr(ma));
-
-        // Store average values if asked
-        if (keep_averages_in_memory) {
-            // Could be executed concurrently, use mutex when in multithreading context
-            auto lock = (nthread > 0 ?
-                std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
-
-            m_ml.add(id_type, tngal*ml);
-            m_ma.add(id_type, tngal*ma);
-        }
-
-        if (write_cache) {
-            // Could be executed concurrently, use mutex when in multithreading context
-            auto lock = (nthread > 0 ?
-                std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
-
-            fitter_cache.update_elements("chi2_obs", w.chi2_best,   fits::at(iter,_));
-            fitter_cache.update_elements("best_z",   w.cache_bestz, fits::at(iter,_));
-            fitter_cache.update_elements("z_obs",    w.z_obs,       fits::at(iter,_));
-            fitter_cache.update_elements("z_obsm",   w.z_obsm,      fits::at(iter,_));
-            if (cache_save_pmodel) {
-                fitter_cache.update_elements("best_coef", w.cache_bestc, fits::at(iter,_,_));
-                fitter_cache.update_elements("pz_coef",   w.cache_pzc,   fits::at(iter,_,_));
-                if (limited_set > 0) {
-                    fitter_cache.update_elements("pz_sed", w.cache_pzs, fits::at(iter,_,_));
-                }
-            }
-
-            fitter_cache.update_elements("e1_obs",      ml.e1,  fits::at(iter));
-            fitter_cache.update_elements("e2_obs",      ml.e2,  fits::at(iter));
-            fitter_cache.update_elements("r2_obs",      ml.r2,  fits::at(iter));
-            fitter_cache.update_elements("e1_obsm",     ma.e1,  fits::at(iter));
-            fitter_cache.update_elements("e2_obsm",     ma.e2,  fits::at(iter));
-            fitter_cache.update_elements("r2_obsm",     ma.r2,  fits::at(iter));
-            fitter_cache.update_elements("e1_obs_err",  ml2.e1, fits::at(iter));
-            fitter_cache.update_elements("e2_obs_err",  ml2.e2, fits::at(iter));
-            fitter_cache.update_elements("r2_obs_err",  ml2.r2, fits::at(iter));
-            fitter_cache.update_elements("e1_obsm_err", ma2.e1, fits::at(iter));
-            fitter_cache.update_elements("e2_obsm_err", ma2.e2, fits::at(iter));
-            fitter_cache.update_elements("r2_obsm_err", ma2.r2, fits::at(iter));
-        }
-    }
-
-    void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
-
-        workspace local;
-        workspace& w = (nthread == 0 ? global : local);
-
-        fitter_cache.read_elements("best_coef", w.cache_bestc, fits::at(iter,_,_));
-        fitter_cache.read_elements("best_z",    w.cache_bestz, fits::at(iter,_));
-        fitter_cache.read_elements("pz_coef",   w.cache_pzc,   fits::at(iter,_,_));
-        if (limited_set > 0) {
-            fitter_cache.read_elements("pz_sed", w.cache_pzs,  fits::at(iter,_,_));
-        }
-
-        compute_averages(iter, w, id_type, tngal);
-    }
-
-    void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
+    fit_result do_fit(uint_t iter, const vec1d& ftot) override {
+        fit_result fr(nmc);
 
         workspace local;
         if (nthread > 0) {
@@ -485,12 +312,17 @@ public :
         workspace& w = (nthread == 0 ? global : local);
 
         // Setup priors
-        set_priors(w, fdisk, fbulge);
+        set_priors(w, ftot);
 
         // Local variables
         matrix::mat2d alpha(ntemplate, ntemplate);
         vec1d beta(ntemplate);
         vec1d tcoefs(ntemplate);
+
+        vec2f osed;
+        if (save_seds) {
+            osed.resize(nmc, save_sed_lambda.size());
+        }
 
         // Simulate redshift measurements
         // We do it in two passes to save computations:
@@ -499,13 +331,13 @@ public :
 
         // Step 1): compute chi2
         for (uint_t i : range(nmc)) {
-            w.chi2_best.safe[i] = finf;
+            fr.chi2.safe[i] = finf;
         }
 
         for (uint_t iz : range(nzfit)) {
             // Create noise-free photometry
             for (uint_t l : range(nband)) {
-                double bftot = fdisk.safe[l+1] + fbulge.safe[l+1];
+                double bftot = ftot.safe[l];
                 w.weight.safe[l] = 1.0/sqrt(phot_err2.safe[l] + sqr(bftot*(rel_err + tpl_err.safe(iz,l))));
                 w.rflux.safe[l] = w.wflux.safe[l] = bftot*w.weight.safe[l];
             }
@@ -718,8 +550,8 @@ public :
                 // Store results
                 w.chi2.safe(i,iz) = tchi2;
 
-                if (tchi2 < w.chi2_best.safe[i]) {
-                    w.chi2_best.safe[i] = tchi2;
+                if (tchi2 < fr.chi2.safe[i]) {
+                    fr.chi2.safe[i] = tchi2;
                     w.cache_bestz.safe[i] = iz;
                     for (uint_t it : range(ntemplate)) {
                         w.cache_bestc.safe(i,it) = tcoefs.safe[it];
@@ -759,20 +591,20 @@ public :
 
         // Step 2): compute p(z)
         for (uint_t i : range(nmc)) {
-            w.z_obs.safe[i] = zfit.safe[w.cache_bestz.safe[i]];
-            w.z_obsm.safe[i] = 0.0;
+            fr.z_obs.safe[i] = zfit.safe[w.cache_bestz.safe[i]];
+            fr.z_obsm.safe[i] = 0.0;
 
             // Create likelihood, apply prior, and marginalize over SEDs to build p(z)
             double tprob = 0.0;
             for (uint_t iz : range(nzfit)) {
-                w.pz.safe[iz] = exp(-0.5*(w.chi2.safe(i,iz) - w.chi2_best.safe[i]))*w.prior.safe[iz];
+                w.pz.safe[iz] = exp(-0.5*(w.chi2.safe(i,iz) - fr.chi2.safe[i]))*w.prior.safe[iz];
                 tprob += w.pz.safe[iz];
             }
 
             // Apply p(z) to cache_pzc
             for (uint_t iz : range(nzfit)) {
                 w.pz.safe[iz] /= tprob;
-                w.z_obsm.safe[i] += zfit.safe[iz]*w.pz.safe[iz];
+                fr.z_obsm.safe[i] += zfit.safe[iz]*w.pz.safe[iz];
 
                 for (uint_t it : range(nsed)) {
                     uint_t im = iz*nsed + it;
@@ -780,42 +612,127 @@ public :
                 }
             }
 
-            if (keep_individuals_in_memory) {
-                indiv_chi2.safe(iter,i) = w.chi2_best.safe[i];
-                indiv_zml.safe(iter,i)  = w.z_obs.safe[i];
-                indiv_zma.safe(iter,i)  = w.z_obsm.safe[i];
-
-                if (indiv_save_coefs) {
-                    if (limited_set > 0) {
-                        // Only store the non-zero coefs and SEDs (saves space)
-                        uint_t inz = 0;
-                        for (uint_t it : range(nsed)) {
-                            while (inz < ntemplate && w.cache_bestc.safe(i,inz) == 0.0) {
-                                ++inz;
-                            }
-
-                            if (inz == ntemplate) {
-                                // Fewer templates used than maximum, set rest to zero
-                                indiv_seds(iter,i,it)       = 0;
-                                indiv_coefs.safe(iter,i,it) = 0.0;
-                            } else {
-                                // Found template
-                                indiv_seds(iter,i,it)       = inz;
-                                indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,inz);
-                                ++inz;
-                            }
+            if (keep_individuals_in_memory && indiv_save_coefs) {
+                if (limited_set > 0) {
+                    // Only store the non-zero coefs and SEDs (saves space)
+                    uint_t inz = 0;
+                    for (uint_t it : range(nsed)) {
+                        while (inz < ntemplate && w.cache_bestc.safe(i,inz) == 0.0) {
+                            ++inz;
                         }
-                    } else {
-                        // Store all coefs
-                        for (uint_t it : range(ntemplate)) {
-                            indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,it);
+
+                        if (inz == ntemplate) {
+                            // Fewer templates used than maximum, set rest to zero
+                            indiv_seds(iter,i,it)       = 0;
+                            indiv_coefs.safe(iter,i,it) = 0.0;
+                        } else {
+                            // Found template
+                            indiv_seds(iter,i,it)       = inz;
+                            indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,inz);
+                            ++inz;
+                        }
+                    }
+                } else {
+                    // Store all coefs
+                    for (uint_t it : range(ntemplate)) {
+                        indiv_coefs.safe(iter,i,it) = w.cache_bestc.safe(i,it);
+                    }
+                }
+            }
+
+            if (save_seds) {
+                uint_t iz = w.cache_bestz.safe[i];
+                for (uint_t it : range(ntemplate)) {
+                    double c = w.cache_bestc.safe(i,it);
+                    if (c > 0.0) {
+                        for (uint_t il : range(save_sed_lambda)) {
+                            osed(i,il) += c*save_sed_eazy_fluxes(it,iz,il);
                         }
                     }
                 }
             }
+
+            // Maximum likelihood
+            {
+                uint_t iz = w.cache_bestz.safe[i];
+
+                // Compute flux-weighted average moments for this model
+                double q11 = 0.0, q12 = 0.0, q22 = 0.0;
+                double wtot = 0.0;
+                for (uint_t it : range(ntemplate)) {
+                    uint_t im = iz*ntemplate + it;
+
+                    double tw = w.cache_bestc.safe(i,it)*eazy_fvis.safe[im];
+                    wtot += tw;
+
+                    q11 += tw*eazy_q11.safe[im];
+                    q12 += tw*eazy_q12.safe[im];
+                    q22 += tw*eazy_q22.safe[im];
+                }
+
+                fr.psf_obs.safe[i] = metrics(q11/wtot, q12/wtot, q22/wtot);
+            }
+
+
+            // Marginalization
+            {
+                // Compute flux-weighted average moments for this model
+                double q11 = 0.0, q12 = 0.0, q22 = 0.0;
+                double wtot = 0.0;
+
+                for (uint_t iz : range(nzfit)) {
+                    if (limited_set > 0) {
+                        for (uint_t it : range(nsed)) {
+                            uint_t imm = iz*nsed      + it;
+                            uint_t im  = iz*ntemplate + w.cache_pzs.safe(i,imm);
+
+                            double tw = w.cache_pzc.safe(i,imm)*eazy_fvis.safe[im];
+                            wtot += tw;
+
+                            q11 += tw*eazy_q11.safe[im];
+                            q12 += tw*eazy_q12.safe[im];
+                            q22 += tw*eazy_q22.safe[im];
+                        }
+                    } else {
+                        for (uint_t it : range(ntemplate)) {
+                            uint_t im = iz*ntemplate + it;
+
+                            double tw = w.cache_pzc.safe(i,im)*eazy_fvis.safe[im];
+                            wtot += tw;
+
+                            q11 += tw*eazy_q11.safe[im];
+                            q12 += tw*eazy_q12.safe[im];
+                            q22 += tw*eazy_q22.safe[im];
+                        }
+                    }
+                }
+
+                fr.psf_obsm.safe[i] = metrics(q11, q12, q22);
+            }
         }
 
-        compute_averages(iter, w, id_type, tngal);
+        // Save SEDs
+        if (save_seds) {
+            fits::update_table("seds/sed_"+to_string(iter)+".fits", "sed_obs", osed);
+        }
+
+        // Save things in the cache
+        if (write_cache) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
+
+            fitter_cache_ptr->update_elements("best_z",   w.cache_bestz, fits::at(iter,_));
+            if (cache_save_pmodel) {
+                fitter_cache_ptr->update_elements("best_coef", w.cache_bestc, fits::at(iter,_,_));
+                fitter_cache_ptr->update_elements("pz_coef",   w.cache_pzc,   fits::at(iter,_,_));
+                if (limited_set > 0) {
+                    fitter_cache_ptr->update_elements("pz_sed", w.cache_pzs, fits::at(iter,_,_));
+                }
+            }
+        }
+
+        return fr;
     }
 
     vec1d get_inoue(double z, const vec1d& lam) const {
@@ -964,13 +881,6 @@ public :
         return tau;
     }
 
-    void initialize_redshift_bin(uint_t iz) override {
-        if (keep_averages_in_memory) {
-            zml.resize(uzf.size());
-            zma.resize(uzf.size());
-        }
-    }
-
     std::string make_cache_hash() override {
         return hash(use_noline_library, use_egg_library, egg_sed_step, limited_set,
             prior_file, prior_filter, apply_igm, zfit, eazy_seds, tpl_error_y, fit_tftol);
@@ -979,8 +889,7 @@ public :
     void reset_workspace(workspace& w) {
         w.prior.resize(nzfit);
         w.chi2.resize(nmc, nzfit);
-        w.pz.resize(nzfit);
-        w.chi2_best.resize(nmc);
+        w.pz.resize(nzfit);;
 
         w.wflux.resize(nband);
         w.rflux.resize(nband);
@@ -988,8 +897,6 @@ public :
         w.wmodel.resize(ntemplate, nband);
 
         w.cache_bestz.resize(nmc);
-        w.z_obs.resize(nmc);
-        w.z_obsm.resize(nmc);
         w.cache_bestc.resize(nmc,ntemplate);
         w.cache_pzc.resize(nmc,nzfit*nsed);
         if (limited_set > 0) {
@@ -997,9 +904,7 @@ public :
         }
     }
 
-    void initialize_redshift_slice(uint_t itz) override {
-        double zf = uzf[itz];
-
+    void initialize_fitter(double zf) override {
         // Enforce redshift if asked
         if (force_true_z) {
             zfit = {zf};
@@ -1024,7 +929,7 @@ public :
         }
 
         bool compute_fluxes = false;
-        if (!cache_available || tpl_flux.empty()) {
+        if (tpl_flux.empty()) {
             tpl_flux.resize(nmodel, nband);
             compute_fluxes = true;
         }
@@ -1100,109 +1005,47 @@ public :
             }
         }
 
-        // Reset averages
-        if (keep_averages_in_memory) {
-            m_ml.reset();
-            m_ma.reset();
-        }
-
         // Create workspace
         if (nthread == 0) {
             reset_workspace(global);
         }
 
         // Initialize individual arrays
-        if (keep_individuals_in_memory) {
-            indiv_ml.resize(niter,nmc);
-            indiv_ma.resize(niter,nmc);
-            indiv_chi2.resize(niter,nmc);
-            indiv_zml.resize(niter,nmc);
-            indiv_zma.resize(niter,nmc);
-
-            if (indiv_save_coefs) {
-                indiv_coefs.resize(niter,nmc,nsed);
-                if (limited_set > 0) {
-                    indiv_seds.resize(niter,nmc,nsed);
-                }
+        if (keep_individuals_in_memory && indiv_save_coefs) {
+            indiv_coefs.resize(niter,nmc,nsed);
+            if (limited_set > 0) {
+                indiv_seds.resize(niter,nmc,nsed);
             }
         }
     }
 
-    void initialize_cache() override {
+    void initialize_cache(fits::table& cache) override {
+        fitter_cache_ptr = &cache;
+
         // Initialize arrays
-        fitter_cache.allocate_column<float>("chi2_obs",    niter, nmc);
-        fitter_cache.allocate_column<uint_t>("best_z",     niter, nmc);
-        fitter_cache.allocate_column<float>("z_obs",       niter, nmc);
-        fitter_cache.allocate_column<float>("z_obsm",      niter, nmc);
+        cache.allocate_column<uint_t>("best_z", niter, nmc);
         if (cache_save_pmodel) {
-            fitter_cache.allocate_column<float>("best_coef",  niter, nmc, ntemplate);
-            fitter_cache.allocate_column<float>("pz",         niter, nzfit);
-            fitter_cache.allocate_column<float>("pc",         niter, nmodel);
+            cache.allocate_column<float>("best_coef", niter, nmc, ntemplate);
+            cache.allocate_column<float>("pz",        niter, nzfit);
+            cache.allocate_column<float>("pc",        niter, nmodel);
         }
-        fitter_cache.allocate_column<float>("e1_obs",      niter);
-        fitter_cache.allocate_column<float>("e2_obs",      niter);
-        fitter_cache.allocate_column<float>("r2_obs",      niter);
-        fitter_cache.allocate_column<float>("e1_obsm",     niter);
-        fitter_cache.allocate_column<float>("e2_obsm",     niter);
-        fitter_cache.allocate_column<float>("r2_obsm",     niter);
-        fitter_cache.allocate_column<float>("e1_obs_err",  niter);
-        fitter_cache.allocate_column<float>("e2_obs_err",  niter);
-        fitter_cache.allocate_column<float>("r2_obs_err",  niter);
-        fitter_cache.allocate_column<float>("e1_obsm_err", niter);
-        fitter_cache.allocate_column<float>("e2_obsm_err", niter);
-        fitter_cache.allocate_column<float>("r2_obsm_err", niter);
 
         // Save meta data
-        fitter_cache.write_columns("z_grid", zfit, "sed_grid", eazy_seds);
+        cache.write_columns("z_grid", zfit, "sed_grid", eazy_seds);
     }
 
-    void finalize_redshift_slice(uint_t itz) override {
-        if (keep_averages_in_memory) {
-            // Average quantities
-            m_ml.normalize(ngal, nqu, nsf);
-            m_ma.normalize(ngal, nqu, nsf);
+    void save_individuals(const std::string& filename) override {
+        // Write to disk the individual measurements
+        fits::table otbl(filename);
+        otbl.update_column("z_grid",   zfit);
+        otbl.update_column("sed_grid", eazy_seds);
 
-            // Store
-            zml[itz] = m_ml;
-            zma[itz] = m_ma;
-        }
-
-        if (write_individuals) {
-            // Write to disk the individual measurements
-            fits::table otbl(indiv_filename);
-            otbl.update_column("e1_obs",   get_e1(indiv_ml));
-            otbl.update_column("e2_obs",   get_e2(indiv_ml));
-            otbl.update_column("r2_obs",   get_r2(indiv_ml));
-            otbl.update_column("e1_obsm",  get_e1(indiv_ma));
-            otbl.update_column("e2_obsm",  get_e2(indiv_ma));
-            otbl.update_column("r2_obsm",  get_r2(indiv_ma));
-            otbl.update_column("chi2_obs", indiv_chi2);
-            otbl.update_column("z_obs",    indiv_zml);
-            otbl.update_column("z_obsm",   indiv_zma);
-            otbl.update_column("z_grid",   zfit);
-            otbl.update_column("sed_grid", eazy_seds);
-
-            if (indiv_save_coefs) {
-                otbl.update_column("coef_obs", indiv_coefs);
-                if (limited_set > 0) {
-                    otbl.update_column("seds_obs", indiv_seds);
-                }
+        if (indiv_save_coefs) {
+            otbl.update_column("coef_obs", indiv_coefs);
+            if (limited_set > 0) {
+                otbl.update_column("seds_obs", indiv_seds);
             }
         }
-    }
-
-    void finalize_redshift_bin(uint_t iz, double ntot, double ntot_qu, double ntot_sf) override {
-        // Average over N(z)
-        m_ml = integrate(uzf, zml, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
-        m_ma = integrate(uzf, zma, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
-
-        // Save
-        to_fits("psf-mean-z"+to_string(iz)+"-eazy-ml.fits", m_ml,
-            uzf, dndz, dndz_qu, dndz_sf, zml
-        );
-        to_fits("psf-mean-z"+to_string(iz)+"-eazy-ma.fits", m_ma,
-            uzf, dndz, dndz_qu, dndz_sf, zma
-        );
     }
 };
 
@@ -1245,7 +1088,6 @@ int vif_main(int argc, char* argv[]) {
     bool egg_sed_borders = false;
     bool egg_sed_add_center = false;
     bool write_cache = false;
-    bool use_cache = false;
     bool cache_save_pmodel = true;
     bool write_individuals = true;
     bool write_averages = false;
@@ -1262,7 +1104,7 @@ int vif_main(int argc, char* argv[]) {
 
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, prior_file, dz,
-        seds_step, apply_igm, zfit_max, zfit_dz, write_cache, use_cache, iz, template_error,
+        seds_step, apply_igm, zfit_max, zfit_dz, write_cache, iz, template_error,
         template_error_amp, force_true_z, no_noise, use_noline_library, use_egg_library,
         limited_set, egg_sed_step, cache_save_pmodel, share_dir, filter_db, psf_file, sed_dir,
         nthread, write_individuals, write_averages, cache_id, sed_lib, sed_imf, use_eggpp_library,
@@ -1272,7 +1114,6 @@ int vif_main(int argc, char* argv[]) {
 
     eazy_averager pavg;
     pavg.write_cache = write_cache;
-    pavg.use_cache = use_cache;
 
     // Setup survey
     egg::generator_options opts;

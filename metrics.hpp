@@ -103,52 +103,6 @@ auto get_r2 = vectorize_lambda([](const metrics& n) {
     return n.r2;
 });
 
-// Set of average PSFs for multiple categories of galaxies
-struct metrics_set {
-    metrics all, qu, sf;
-
-    void reset() {
-        all.reset();
-        qu.reset();
-        sf.reset();
-    }
-
-    void add(uint_t it, const metrics& m) {
-        all += m;
-        if (it == 0) {
-            qu += m;
-        } else {
-            sf += m;
-        }
-    }
-
-    void normalize(double ntot, double nqu, double nsf) {
-        all /= ntot;
-        qu /= nqu;
-        sf /= nsf;
-    }
-};
-
-auto get_all = vectorize_lambda([](const metrics_set& n) {
-    return n.all;
-});
-auto get_qu = vectorize_lambda([](const metrics_set& n) {
-    return n.qu;
-});
-auto get_sf = vectorize_lambda([](const metrics_set& n) {
-    return n.sf;
-});
-
-metrics_set integrate(const vec1d& z, const vec<1,metrics_set>& v,
-    const vec1d& dndz, const vec1d& dndz_qu, const vec1d& dndz_sf) {
-
-    metrics_set m;
-    m.all = integrate(z, get_all(v)*dndz);
-    m.qu  = integrate(z, get_qu(v)*dndz_qu);
-    m.sf  = integrate(z, get_sf(v)*dndz_sf);
-
-    return m;
-}
 
 void to_fits(std::string filename, std::string suffix, const metrics& m, const vec<1,metrics>& zm) {
     fits::update_table(filename,
@@ -161,13 +115,10 @@ void to_fits(std::string filename, std::string suffix, const metrics& m, const v
     );
 }
 
-void to_fits(std::string filename, const metrics_set& m,
-    const vec1d& z, const vec1d& dndz, const vec1d& dndz_qu, const vec1d& dndz_sf,
-    const vec<1,metrics_set>& zm) {
+void to_fits(std::string filename, const metrics& m,
+    const vec1d& z, const vec1d& dndz, const vec<1,metrics>& zm) {
 
-    fits::write_table(filename, "z", z, "dndz", dndz, "dndz_qu", dndz_qu, "dndz_sf", dndz_sf);
+    fits::write_table(filename, "z", z, "dndz", dndz);
 
-    to_fits(filename, "",    m.all, get_all(zm));
-    to_fits(filename, "_qu", m.qu,  get_qu(zm));
-    to_fits(filename, "_sf", m.sf,  get_sf(zm));
+    to_fits(filename, "", m, zm);
 }

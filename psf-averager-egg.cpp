@@ -8,11 +8,10 @@ public :
         global_progress_bar = true;
     }
 
-    void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {}
-
-    void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {}
+    fit_result do_fit(uint_t iter, const vec1d& ftot) override {
+        fit_result fr(nmc);
+        return fr;
+    }
 
     std::string make_cache_hash() override {
         return "";
@@ -46,7 +45,6 @@ int vif_main(int argc, char* argv[]) {
 
     egg_averager pavg;
     pavg.write_cache = false;
-    pavg.use_cache = false;
 
     // Setup survey
     egg::generator_options opts;

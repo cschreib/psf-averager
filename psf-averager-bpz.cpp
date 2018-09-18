@@ -17,16 +17,6 @@ struct fitter_options {
 
 class bpz_averager : public psf_averager {
 public :
-    // Averages
-    metrics_set m_ml; // maximum likelihood
-    metrics_set m_ma; // marginalization
-
-    vec<1,metrics_set> zml, zma;
-
-    // Individuals
-    vec<2,metrics> indiv_ml, indiv_ma;
-    vec2f indiv_chi2, indiv_zml, indiv_zma;
-
     // BPZ PSF library
     vec1d bpz_q11, bpz_q12, bpz_q22;
 
@@ -45,6 +35,7 @@ public :
 
     // Internal variables (constant per slice)
     vec2d tpl_flux;
+    fits::table* fitter_cache_ptr = nullptr;
 
     // Internal variables (workspace)
     struct workspace {
@@ -52,13 +43,11 @@ public :
         vec1d prior;
         vec1d tt_prior;
         vec1d pz, pzc;
-        vec1d chi2_best;
 
         vec1d wflux, rflux, weight;
         vec2d wmodel;
         vec1d wmm;
 
-        vec1d z_obs, z_obsm;
         vec2d cache_pmodel;
         vec1u cache_bmodel;
     };
@@ -109,11 +98,11 @@ public :
 
         vif_check(is_any_of(opts.prior_filter, bands),
             "prior filter is not in the filter list ('", opts.prior_filter, "' not found')");
-        id_prior = where_first(opts.prior_filter == bands) + 1;
+        id_prior = where_first(opts.prior_filter == bands);
 
         // Setup redshift grid
         nzfit_base = ceil(opts.zfit_max/opts.zfit_dz);
-        zfit_base = opts.zfit_dz*dindgen(nzfit_base);
+        zfit_base = opts.zfit_dz*indgen<double>(nzfit_base);
 
         // Build (and resample) BPZ library
         make_sed_library();
@@ -261,8 +250,8 @@ public :
         }
     }
 
-    void set_priors(workspace& w, const vec1d& fdisk, const vec1d& fbulge) {
-        double mag = -2.5*log10(fdisk.safe[id_prior] + fbulge.safe[id_prior]) + 23.9;
+    void set_priors(workspace& w, const vec1d& ftot) {
+        double mag = -2.5*log10(ftot.safe[id_prior]) + 23.9;
 
         double momin;
         vec1d alpha, z0, km, kt, ft;
@@ -387,104 +376,8 @@ public :
         }
     }
 
-    void compute_averages(uint_t iter, const workspace& w, uint_t id_type, double tngal) {
-        // Maximum likelihood
-        // ------------------
-
-        metrics ml;
-        metrics ml2;
-        for (uint_t i : range(nmc)) {
-            uint_t iml = w.cache_bmodel.safe(i);
-            metrics tm(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
-            ml  += tm;
-            ml2 += sqr(tm);
-
-            if (keep_individuals_in_memory) {
-                indiv_ml.safe(iter,i) = tm;
-            }
-        }
-
-        ml /= nmc;
-        ml2 /= nmc;
-        ml2 = sqrt(ml2 - sqr(ml));
-
-
-        // Marginalization
-        // ---------------
-
-        metrics ma;
-        metrics ma2;
-        for (uint_t i : range(nmc)) {
-            metrics tm;
-            for (uint_t im : range(nmodel)) {
-                metrics ttm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
-                tm += w.cache_pmodel.safe(i,im)*ttm;
-            }
-
-            ma  += tm;
-            ma2 += sqr(tm);
-
-            if (keep_individuals_in_memory) {
-                indiv_ma.safe(iter,i) = tm;
-            }
-        }
-
-        ma /= nmc;
-        ma2 /= nmc;
-        ma2 = sqrt(ma2 - sqr(ma));
-
-        // Store average values if asked
-        if (keep_averages_in_memory) {
-            // Could be executed concurrently, use mutex when in multithreading context
-            auto lock = (nthread > 0 ?
-                std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
-
-            m_ml.add(id_type, tngal*ml);
-            m_ma.add(id_type, tngal*ma);
-        }
-
-        if (write_cache) {
-            // Could be executed concurrently, use mutex when in multithreading context
-            auto lock = (nthread > 0 ?
-                std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
-
-            if (cache_save_pmodel) {
-                fitter_cache.update_elements("pmodel", w.cache_pmodel, fits::at(iter,_,_));
-            }
-            fitter_cache.update_elements("bmodel",   w.cache_bmodel, fits::at(iter,_));
-            fitter_cache.update_elements("chi2_obs", w.chi2_best,    fits::at(iter,_));
-            fitter_cache.update_elements("z_obs",    w.z_obs,        fits::at(iter,_));
-            fitter_cache.update_elements("z_obsm",   w.z_obsm,       fits::at(iter,_));
-
-            fitter_cache.update_elements("e1_obs",      ml.e1,  fits::at(iter));
-            fitter_cache.update_elements("e2_obs",      ml.e2,  fits::at(iter));
-            fitter_cache.update_elements("r2_obs",      ml.r2,  fits::at(iter));
-            fitter_cache.update_elements("e1_obsm",     ma.e1,  fits::at(iter));
-            fitter_cache.update_elements("e2_obsm",     ma.e2,  fits::at(iter));
-            fitter_cache.update_elements("r2_obsm",     ma.r2,  fits::at(iter));
-            fitter_cache.update_elements("e1_obs_err",  ml2.e1, fits::at(iter));
-            fitter_cache.update_elements("e2_obs_err",  ml2.e2, fits::at(iter));
-            fitter_cache.update_elements("r2_obs_err",  ml2.r2, fits::at(iter));
-            fitter_cache.update_elements("e1_obsm_err", ma2.e1, fits::at(iter));
-            fitter_cache.update_elements("e2_obsm_err", ma2.e2, fits::at(iter));
-            fitter_cache.update_elements("r2_obsm_err", ma2.r2, fits::at(iter));
-        }
-    }
-
-    void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
-
-        workspace local;
-        workspace& w = (nthread == 0 ? global : local);
-
-        fitter_cache.read_elements("bmodel", w.cache_bmodel, fits::at(iter,_));
-        fitter_cache.read_elements("pmodel", w.cache_pmodel, fits::at(iter,_,_));
-
-        compute_averages(iter, w, id_type, tngal);
-    }
-
-    void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
+    fit_result do_fit(uint_t iter, const vec1d& ftot) override {
+        fit_result fr(nmc);
 
         workspace local;
         if (nthread > 0) {
@@ -494,11 +387,11 @@ public :
         workspace& w = (nthread == 0 ? global : local);
 
         // Setup priors
-        set_priors(w, fdisk, fbulge);
+        set_priors(w, ftot);
 
         // Create noise-free photometry
         for (uint_t l : range(nband)) {
-            double bftot = fdisk.safe[l+1] + fbulge.safe[l+1];
+            double bftot = ftot.safe[l];
             w.weight.safe[l] = 1.0/sqrt(phot_err2.safe[l] + sqr(bftot*rel_err));
             w.rflux.safe[l] = w.wflux.safe[l] = bftot*w.weight.safe[l];
         }
@@ -528,7 +421,7 @@ public :
 
             // Find best SED and z, and store chi2 to build p(z,SED)
             uint_t iml = npos;
-            w.chi2_best.safe[i] = finf;
+            fr.chi2.safe[i] = finf;
             for (uint_t im : range(nmodel)) {
                 double* wm = &w.wmodel.safe(im,0);
                 double* wf = &w.rflux.safe[0];
@@ -547,8 +440,8 @@ public :
 
                 w.pmodel.safe[im] = tchi2;
 
-                if (tchi2 < w.chi2_best.safe[i]) {
-                    w.chi2_best.safe[i] = tchi2;
+                if (tchi2 < fr.chi2.safe[i]) {
+                    fr.chi2.safe[i] = tchi2;
                     iml = im;
                 }
             }
@@ -558,7 +451,7 @@ public :
                 w.pz.safe[iz] = 0.0;
                 for (uint_t it : range(ntemplate)) {
                     uint_t im = iz*ntemplate + it;
-                    w.pmodel.safe[im] = exp(-0.5*(w.pmodel.safe[im] - w.chi2_best.safe[i]))*w.prior.safe[im];
+                    w.pmodel.safe[im] = exp(-0.5*(w.pmodel.safe[im] - fr.chi2.safe[i]))*w.prior.safe[im];
                     w.pz.safe[iz] += w.pmodel.safe[im];
                 }
             }
@@ -603,29 +496,41 @@ public :
 
             w.pmodel /= tprob;
 
-            double zmarg = total(zfit*w.pzc)/total(w.pzc);
-
-            if (keep_individuals_in_memory) {
-                indiv_chi2.safe(iter,i) = w.chi2_best.safe[i];
-                indiv_zml.safe(iter,i) = zfit.safe[iml/ntemplate];
-                indiv_zma.safe(iter,i) = zmarg;
-            }
-
-            if (write_cache) {
-                w.z_obs.safe[i] = zfit.safe[iml/ntemplate];
-                w.z_obsm.safe[i] = zmarg;
-            }
+            fr.z_obs.safe[i] = zfit.safe[iml/ntemplate];
+            fr.z_obsm.safe[i] = total(zfit*w.pzc)/total(w.pzc);
 
             w.cache_bmodel.safe[i] = iml;
 
             for (uint_t im : range(nmodel)) {
                 w.cache_pmodel.safe(i,im) = w.pmodel.safe[im];
             }
+
+            // Maximum likelihood
+            fr.psf_obs.safe[i] = metrics(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
+
+            // Marginalization
+            metrics& tm = fr.psf_obsm.safe[i];
+            for (uint_t im : range(nmodel)) {
+                metrics ttm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
+                tm += w.cache_pmodel.safe(i,im)*ttm;
+            }
         }
 
         w.cache_pmodel /= nmc;
 
-        compute_averages(iter, w, id_type, tngal);
+        // Save things in the cache
+        if (write_cache) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
+
+            if (cache_save_pmodel) {
+                fitter_cache_ptr->update_elements("pmodel", w.cache_pmodel, fits::at(iter,_,_));
+            }
+            fitter_cache_ptr->update_elements("bmodel",   w.cache_bmodel, fits::at(iter,_));
+        }
+
+        return fr;
     }
 
     vec1d get_madau(double z, const vec1d& lam) const {
@@ -665,13 +570,6 @@ public :
         return exp(-clamp(tau, 0, 700));
     }
 
-    void initialize_redshift_bin(uint_t iz) override {
-        if (keep_averages_in_memory) {
-            zml.resize(uzf.size());
-            zma.resize(uzf.size());
-        }
-    }
-
     std::string make_cache_hash() override {
         return hash(use_capak_library, use_egg_library, use_noline_library,
             apply_igm, zfit, bpz_seds, ninterp, gauss_convolve, cache_save_pmodel);
@@ -683,7 +581,6 @@ public :
         w.tt_prior.resize(nzfit*3);
         w.pz.resize(nzfit);
         w.pzc.resize(nzfit);
-        w.chi2_best.resize(nmc);
 
         w.wflux.resize(nband);
         w.rflux.resize(nband);
@@ -693,16 +590,9 @@ public :
 
         w.cache_bmodel.resize(nmc);
         w.cache_pmodel.resize(nmc, nmodel);
-
-        if (write_cache) {
-            w.z_obs.resize(nmc);
-            w.z_obsm.resize(nmc);
-        }
     }
 
-    void initialize_redshift_slice(uint_t itz) override {
-        double zf = uzf[itz];
-
+    void initialize_fitter(double zf) override {
         // Enforce redshift if asked
         if (force_true_z) {
             zfit = {zf};
@@ -724,7 +614,7 @@ public :
         }
 
         bool compute_fluxes = false;
-        if (!cache_available || tpl_flux.empty()) {
+        if (tpl_flux.empty()) {
             tpl_flux.resize(nmodel, nband);
             compute_fluxes = true;
         }
@@ -775,93 +665,30 @@ public :
             }
         }
 
-        // Reset averages
-        if (keep_averages_in_memory) {
-            m_ml.reset();
-            m_ma.reset();
-        }
-
         // Create workspace
         if (nthread == 0) {
             reset_workspace(global);
         }
-
-        // Initialize individual arrays
-        if (keep_individuals_in_memory) {
-            indiv_ml.resize(niter,nmc);
-            indiv_ma.resize(niter,nmc);
-            indiv_chi2.resize(niter,nmc);
-            indiv_zml.resize(niter,nmc);
-            indiv_zma.resize(niter,nmc);
-        }
     }
 
-    void initialize_cache() override {
+    void initialize_cache(fits::table& cache) override {
+        fitter_cache_ptr = &cache;
+
         // Initialize arrays
-        fitter_cache.allocate_column<uint_t>("bmodel",     niter, nmc);
+        cache.allocate_column<uint_t>("bmodel", niter, nmc);
         if (cache_save_pmodel) {
-            fitter_cache.allocate_column<float>("pmodel",  niter, nmodel);
+            cache.allocate_column<float>("pmodel",  niter, nmodel);
         }
-        fitter_cache.allocate_column<float>("chi2_obs",    niter, nmc);
-        fitter_cache.allocate_column<float>("z_obs",       niter, nmc);
-        fitter_cache.allocate_column<float>("z_obsm",      niter, nmc);
-        fitter_cache.allocate_column<float>("e1_obs",      niter);
-        fitter_cache.allocate_column<float>("e2_obs",      niter);
-        fitter_cache.allocate_column<float>("r2_obs",      niter);
-        fitter_cache.allocate_column<float>("e1_obsm",     niter);
-        fitter_cache.allocate_column<float>("e2_obsm",     niter);
-        fitter_cache.allocate_column<float>("r2_obsm",     niter);
-        fitter_cache.allocate_column<float>("e1_obs_err",  niter);
-        fitter_cache.allocate_column<float>("e2_obs_err",  niter);
-        fitter_cache.allocate_column<float>("r2_obs_err",  niter);
-        fitter_cache.allocate_column<float>("e1_obsm_err", niter);
-        fitter_cache.allocate_column<float>("e2_obsm_err", niter);
-        fitter_cache.allocate_column<float>("r2_obsm_err", niter);
 
         // Save meta data
-        fitter_cache.write_columns("z_grid", zfit, "sed_grid", bpz_seds);
+        cache.write_columns("z_grid", zfit, "sed_grid", bpz_seds);
     }
 
-    void finalize_redshift_slice(uint_t itz) override {
-        if (keep_averages_in_memory) {
-            // Average quantities
-            m_ml.normalize(ngal, nqu, nsf);
-            m_ma.normalize(ngal, nqu, nsf);
-
-            // Store
-            zml[itz] = m_ml;
-            zma[itz] = m_ma;
-        }
-
-        if (write_individuals) {
-            // Write to disk the individual measurements
-            fits::table otbl(indiv_filename);
-            otbl.update_column("e1_obs",   get_e1(indiv_ml));
-            otbl.update_column("e2_obs",   get_e2(indiv_ml));
-            otbl.update_column("r2_obs",   get_r2(indiv_ml));
-            otbl.update_column("e1_obsm",  get_e1(indiv_ma));
-            otbl.update_column("e2_obsm",  get_e2(indiv_ma));
-            otbl.update_column("r2_obsm",  get_r2(indiv_ma));
-            otbl.update_column("chi2_obs", indiv_chi2);
-            otbl.update_column("z_obs",    indiv_zml);
-            otbl.update_column("z_obsm",   indiv_zma);
-            otbl.update_column("z_grid",   zfit);
-            otbl.update_column("sed_grid", bpz_seds);
-        }
-    }
-
-    void finalize_redshift_bin(uint_t iz, double ntot, double ntot_qu, double ntot_sf) override {
-        // Average over N(z)
-        m_ml = integrate(uzf, zml, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
-        m_ma = integrate(uzf, zma, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
-
-        // Save
-        to_fits("psf-mean-z"+to_string(iz)+"-bpz-ml.fits", m_ml,
-            uzf, dndz, dndz_qu, dndz_sf, zml
-        );
-        to_fits("psf-mean-z"+to_string(iz)+"-bpz-ma.fits", m_ma,
-            uzf, dndz, dndz_qu, dndz_sf, zma
-        );
+    void save_individuals(const std::string& filename) override {
+        // Write to disk the individual measurements
+        fits::table otbl(filename);
+        otbl.update_column("z_grid",   zfit);
+        otbl.update_column("sed_grid", bpz_seds);
     }
 };
 
@@ -897,7 +724,6 @@ int vif_main(int argc, char* argv[]) {
     bool force_true_z = false;
     bool no_noise = false;
     bool write_cache = false;
-    bool use_cache = false;
     bool cache_save_pmodel = false;
     bool write_individuals = true;
     bool write_averages = false;
@@ -910,14 +736,13 @@ int vif_main(int argc, char* argv[]) {
     read_args(argc, argv, arg_list(
         maglim, selection_band, filters, depths, nmc, min_mag_err, prior_filter, ninterp, dz,
         seds_step, use_capak_library, use_noline_library, apply_igm, zfit_max, zfit_dz, write_cache,
-        use_cache, iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel, share_dir,
+        iz, force_true_z, no_noise, use_egg_library, cache_save_pmodel, share_dir,
         filter_db, psf_file, sed_dir, nthread, write_individuals, write_averages, cache_id, sed_lib,
         sed_imf, cache_dir, prob_limit, nzsplit
     ));
 
     bpz_averager pavg;
     pavg.write_cache = write_cache;
-    pavg.use_cache = use_cache;
 
     // Setup survey
     egg::generator_options opts;

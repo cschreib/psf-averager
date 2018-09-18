@@ -25,20 +25,25 @@ struct mock_options {
 class psf_averager : public egg::generator {
 public :
     // Total number of galaxies
-    double ngal = 0, nqu = 0, nsf = 0;
+    double ngal = 0;
 
     // Averages
     std::mutex avg_mutex;
-    metrics_set m_tr; // EGG (truth)
+    metrics m_tr; // EGG (truth)
+    metrics m_ml; // maximum likelihood
+    metrics m_ma; // marginalization
     vec1d uzf;
-    vec1d dndz, dndz_qu, dndz_sf;
+    vec1d dndz;
 
     // Individuals
-    vec<1,metrics> indiv_tr; // EGG (truth)
     vec1u indiv_id_mass, indiv_id_type, indiv_id_disk, indiv_id_bulge, indiv_id_bt;
     vec1d indiv_ngal;
     vec1f indiv_uv, indiv_vj;
     vec2f indiv_fdisk, indiv_fbulge;
+    vec<1,metrics> indiv_tr; // EGG (truth)
+    vec<1,metrics> zml, zma;
+    vec<2,metrics> indiv_ml, indiv_ma;
+    vec2f indiv_chi2, indiv_zml, indiv_zma;
 
     // Monochromatic PSF library
     vec1d mono_lam, mono_q11, mono_q12, mono_q22, mono_w;
@@ -85,8 +90,6 @@ public :
     std::string cache_filename;
     fits::table fitter_cache;
     bool write_cache = false;
-    bool use_cache = false;
-    bool cache_available = false;
     std::string force_cache_id;
     std::string cache_dir;
 
@@ -96,7 +99,6 @@ public :
     bool keep_averages_in_memory = false;
     bool write_averages = false;
     bool save_seds = false;
-    std::string indiv_filename;
 
     psf_averager(const std::string& f) : egg::generator(), fitter(f) {}
 
@@ -206,11 +208,21 @@ public :
         }
     }
 
-    virtual void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk,
-        uint_t id_bulge, uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
+    struct fit_result {
+        explicit fit_result(uint_t n) {
+            chi2.resize(n);
+            z_obs.resize(n);
+            z_obsm.resize(n);
+            psf_obs.resize(n);
+            psf_obsm.resize(n);
+        }
 
-    virtual void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk,
-        uint_t id_bulge, uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) = 0;
+        vec1f chi2;
+        vec1f z_obs, z_obsm;
+        vec<1,metrics> psf_obs, psf_obsm;
+    };
+
+    virtual fit_result do_fit(uint_t iter, const vec1d& ftot) = 0;
 
     void on_generated(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
@@ -247,20 +259,35 @@ public :
         double rfuv = -2.5*log10(rfu/rfv);
         double rfvj = -2.5*log10(rfv/rfj);
 
-        // Store average values if asked
-        if (keep_averages_in_memory) {
-            // Could be executed concurrently, use mutex when in multithreading context
-            auto lock = (nthread > 0 ?
-                std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
+        // Now generate mocks and fit them
+        // -------------------------------
 
-            m_tr.add(id_type, tngal*tr);
+        // Do the fitting
+        vec1d ftot(fdisk.size()-1);
+        for (uint_t l : range(ftot)) {
+            ftot.safe[l] = fdisk.safe[l+1] + fbulge.safe[l+1];
+        }
 
-            ngal += tngal;
-            if (id_type == 0) {
-                nqu += tngal;
-            } else {
-                nsf += tngal;
+        fit_result fr = do_fit(iter, ftot);
+
+        bool has_fit = !fr.z_obs.empty();
+
+        // Compute averages
+        metrics ma, ma2, ml, ml2;
+        if (has_fit) {
+            for (uint_t i : range(nmc)) {
+                ma  += fr.psf_obs.safe[i];
+                ma2 += sqr(fr.psf_obs.safe[i]);
+                ml  += fr.psf_obsm.safe[i];
+                ml2 += sqr(fr.psf_obsm.safe[i]);
             }
+
+            ma  /= nmc;
+            ma2 /= nmc;
+            ma2 = sqrt(ma2 - sqr(ma));
+            ml  /= nmc;
+            ml2 /= nmc;
+            ml2 = sqrt(ml2 - sqr(ml));
         }
 
         // Store individual values if asked
@@ -278,6 +305,16 @@ public :
             indiv_vj.safe[iter]       = rfvj;
             indiv_fdisk.safe(iter,_)  = fdisk;
             indiv_fbulge.safe(iter,_) = fbulge;
+
+            if (has_fit) {
+                for (uint_t i : range(nmc)) {
+                    indiv_chi2.safe(iter,i) = fr.chi2.safe[i];
+                    indiv_zml.safe(iter,i) = fr.z_obs.safe[i];
+                    indiv_zma.safe(iter,i) = fr.z_obsm.safe[i];
+                    indiv_ml.safe(iter,i) = fr.psf_obs.safe[i];
+                    indiv_ma.safe(iter,i) = fr.psf_obsm.safe[i];
+                }
+            }
         }
 
         // Save SEDs if asked
@@ -287,44 +324,64 @@ public :
                 mbt*save_sed_egg_fluxes(id_bulge,_)
             );
 
-            fits::write_table("seds/sed_"+to_string(iter)+".fits",
+            fits::update_table("seds/sed_"+to_string(iter)+".fits",
                 "lam", save_sed_lambda, "sed_true", tsed
             );
         }
 
-        // Now generate mocks and fit them
-        // -------------------------------
+        // Store average values if asked
+        if (keep_averages_in_memory) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(avg_mutex) : std::unique_lock<std::mutex>());
 
-        if (cache_available) {
-            // A cache is present and we can reuse it!
-            process_cached(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
-        } else {
-            // No cached data, must recompute stuff
-
-            // Do the fitting
-            do_fit(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal, fdisk, fbulge);
-
-            // Save things in the cache
-            if (write_cache) {
-                // Could be executed concurrently, use mutex when in multithreading context
-                auto lock = (nthread > 0 ?
-                    std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
-
-                fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
-                fitter_cache.update_elements("it",        id_type,      fits::at(iter));
-                fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
-                fitter_cache.update_elements("ibulge",    id_bulge,     fits::at(iter));
-                fitter_cache.update_elements("ibt",       id_bt,        fits::at(iter));
-                fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
-                fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
-                fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
-                fitter_cache.update_elements("uv",        rfuv,         fits::at(iter));
-                fitter_cache.update_elements("vj",        rfvj,         fits::at(iter));
-                fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
-                fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
-                fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
-                fitter_cache.open(cache_filename);
+            m_tr += tngal*tr;
+            if (has_fit) {
+                m_ml += tngal*ml;
+                m_ma += tngal*ma;
             }
+            ngal += tngal;
+        }
+
+        // Save things in the cache
+        if (write_cache) {
+            // Could be executed concurrently, use mutex when in multithreading context
+            auto lock = (nthread > 0 ?
+                std::unique_lock<std::mutex>(cache_mutex) : std::unique_lock<std::mutex>());
+
+            fitter_cache.update_elements("im",        id_mass,      fits::at(iter));
+            fitter_cache.update_elements("it",        id_type,      fits::at(iter));
+            fitter_cache.update_elements("idisk",     id_disk,      fits::at(iter));
+            fitter_cache.update_elements("ibulge",    id_bulge,     fits::at(iter));
+            fitter_cache.update_elements("ibt",       id_bt,        fits::at(iter));
+            fitter_cache.update_elements("ngal",      tngal,        fits::at(iter));
+            fitter_cache.update_elements("fbulge",    fbulge,       fits::at(iter,_));
+            fitter_cache.update_elements("fdisk",     fdisk,        fits::at(iter,_));
+            fitter_cache.update_elements("uv",        rfuv,         fits::at(iter));
+            fitter_cache.update_elements("vj",        rfvj,         fits::at(iter));
+            fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
+            fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
+            fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
+
+            if (has_fit) {
+                fitter_cache.update_elements("chi2_obs",    fr.chi2,    fits::at(iter,_));
+                fitter_cache.update_elements("z_obs",       fr.z_obs,   fits::at(iter,_));
+                fitter_cache.update_elements("z_obsm",      fr.z_obsm,  fits::at(iter,_));
+                fitter_cache.update_elements("e1_obs",      ml.e1,      fits::at(iter));
+                fitter_cache.update_elements("e2_obs",      ml.e2,      fits::at(iter));
+                fitter_cache.update_elements("r2_obs",      ml.r2,      fits::at(iter));
+                fitter_cache.update_elements("e1_obsm",     ma.e1,      fits::at(iter));
+                fitter_cache.update_elements("e2_obsm",     ma.e2,      fits::at(iter));
+                fitter_cache.update_elements("r2_obsm",     ma.r2,      fits::at(iter));
+                fitter_cache.update_elements("e1_obs_err",  ml2.e1,     fits::at(iter));
+                fitter_cache.update_elements("e2_obs_err",  ml2.e2,     fits::at(iter));
+                fitter_cache.update_elements("r2_obs_err",  ml2.r2,     fits::at(iter));
+                fitter_cache.update_elements("e1_obsm_err", ma2.e1,     fits::at(iter));
+                fitter_cache.update_elements("e2_obsm_err", ma2.e2,     fits::at(iter));
+                fitter_cache.update_elements("r2_obsm_err", ma2.r2,     fits::at(iter));
+            }
+
+            fitter_cache.open(cache_filename);
         }
 
         if (!global_progress_bar) {
@@ -336,17 +393,13 @@ public :
         }
     }
 
-    virtual void initialize_redshift_bin(uint_t iz) {}
+    virtual void initialize_fitter(double zf) {}
 
-    virtual void initialize_redshift_slice(uint_t itz) {}
-
-    virtual void finalize_redshift_slice(uint_t itz) {}
-
-    virtual void finalize_redshift_bin(uint_t it, double ntot, double ntot_qu, double ntot_sf) {}
+    virtual void save_individuals(const std::string& filename) {}
 
     virtual std::string make_cache_hash() = 0;
 
-    virtual void initialize_cache() {}
+    virtual void initialize_cache(fits::table& cache) {}
 
     vec1d resample_sed(const vec1d& tlam, const vec1d& tsed) const {
         const vec1d& blam = save_sed_lambda;
@@ -374,14 +427,12 @@ public :
         }
 
         // Start averaging
-        initialize_redshift_bin(iz);
-
-        vec<1,metrics_set> ztr;
+        vec<1,metrics> ztr;
         if (keep_averages_in_memory) {
             ztr.resize(ntz);
+            zml.resize(ntz);
+            zma.resize(ntz);
             dndz.resize(ntz);
-            dndz_qu.resize(ntz);
-            dndz_sf.resize(ntz);
         }
 
         if (global_progress_bar) {
@@ -451,7 +502,9 @@ public :
             // Reset averages
             if (keep_averages_in_memory) {
                 m_tr.reset();
-                ngal = 0; nqu = 0; nsf = 0;
+                m_ma.reset();
+                m_ml.reset();
+                ngal = 0;
             }
 
             // Pre-compute number of iterations
@@ -488,7 +541,7 @@ public :
             }
 
             // Initialize fitter
-            initialize_redshift_slice(itz);
+            initialize_fitter(zf);
 
             // Initialize cache
             uint_t precision = ceil(max(-log10(dz), 2.0));
@@ -500,23 +553,9 @@ public :
                 cache_id = force_cache_id;
             }
 
-            if (use_cache || write_cache) {
+            if (write_cache) {
                 cache_filename = cache_dir+"cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("cache file: ", cache_filename);
-            }
-
-            cache_available = false;
-            if (use_cache && file::exists(cache_filename)) {
-                cache_available = true;
-                try {
-                    fitter_cache.open(cache_filename);
-                } catch (...) {
-                    warning("cache file ", cache_filename, " was corrupted");
-                    warning("will remove this cache and create a new one");
-
-                    fitter_cache.close();
-                    cache_available = false;
-                }
             }
 
             vec1s tbands(nband+1);
@@ -530,7 +569,7 @@ public :
                 }
             }
 
-            if (!cache_available && write_cache) {
+            if (write_cache) {
                 note("creating cache on disk...");
 
                 file::mkdir(cache_dir);
@@ -538,26 +577,42 @@ public :
                 fitter_cache.open(cache_filename);
 
                 // Create cache arrays
-                fitter_cache.allocate_column<uint_t>("im",           niter);
-                fitter_cache.allocate_column<uint_t>("it",           niter);
-                fitter_cache.allocate_column<uint_t>("idisk",        niter);
-                fitter_cache.allocate_column<uint_t>("ibulge",       niter);
-                fitter_cache.allocate_column<uint_t>("ibt",          niter);
-                fitter_cache.allocate_column<float>("fbulge",        niter, nband+1);
-                fitter_cache.allocate_column<float>("fdisk",         niter, nband+1);
-                fitter_cache.allocate_column<float>("uv",            niter);
-                fitter_cache.allocate_column<float>("vj",            niter);
-                fitter_cache.allocate_column<float>("ngal",          niter);
-                fitter_cache.allocate_column<float>("e1_true",       niter);
-                fitter_cache.allocate_column<float>("e2_true",       niter);
-                fitter_cache.allocate_column<float>("r2_true",       niter);
+                fitter_cache.allocate_column<uint_t>("im",     niter);
+                fitter_cache.allocate_column<uint_t>("it",     niter);
+                fitter_cache.allocate_column<uint_t>("idisk",  niter);
+                fitter_cache.allocate_column<uint_t>("ibulge", niter);
+                fitter_cache.allocate_column<uint_t>("ibt",    niter);
+                fitter_cache.allocate_column<float>("fbulge",  niter, nband+1);
+                fitter_cache.allocate_column<float>("fdisk",   niter, nband+1);
+                fitter_cache.allocate_column<float>("uv",      niter);
+                fitter_cache.allocate_column<float>("vj",      niter);
+                fitter_cache.allocate_column<float>("ngal",    niter);
+                fitter_cache.allocate_column<float>("e1_true", niter);
+                fitter_cache.allocate_column<float>("e2_true", niter);
+                fitter_cache.allocate_column<float>("r2_true", niter);
+
+                fitter_cache.allocate_column<float>("chi2_obs",    niter, nmc);
+                fitter_cache.allocate_column<float>("z_obs",       niter, nmc);
+                fitter_cache.allocate_column<float>("z_obsm",      niter, nmc);
+                fitter_cache.allocate_column<float>("e1_obs",      niter);
+                fitter_cache.allocate_column<float>("e2_obs",      niter);
+                fitter_cache.allocate_column<float>("r2_obs",      niter);
+                fitter_cache.allocate_column<float>("e1_obsm",     niter);
+                fitter_cache.allocate_column<float>("e2_obsm",     niter);
+                fitter_cache.allocate_column<float>("r2_obsm",     niter);
+                fitter_cache.allocate_column<float>("e1_obs_err",  niter);
+                fitter_cache.allocate_column<float>("e2_obs_err",  niter);
+                fitter_cache.allocate_column<float>("r2_obs_err",  niter);
+                fitter_cache.allocate_column<float>("e1_obsm_err", niter);
+                fitter_cache.allocate_column<float>("e2_obsm_err", niter);
+                fitter_cache.allocate_column<float>("r2_obsm_err", niter);
 
                 // Save meta data
                 fitter_cache.write_columns("m_grid", m, "bt_grid", bt);
                 fitter_cache.write_columns("bands", tbands, "lambda", lambda);
 
                 // Let the fitter add its own data to the cache
-                initialize_cache();
+                initialize_cache(fitter_cache);
 
                 fitter_cache.flush();
 
@@ -577,6 +632,11 @@ public :
                 indiv_vj.resize(niter);
                 indiv_fdisk.resize(niter,nband+1);
                 indiv_fbulge.resize(niter,nband+1);
+                indiv_ml.resize(niter,nmc);
+                indiv_ma.resize(niter,nmc);
+                indiv_chi2.resize(niter,nmc);
+                indiv_zml.resize(niter,nmc);
+                indiv_zma.resize(niter,nmc);
             }
 
             // Initialize random numbers
@@ -594,39 +654,50 @@ public :
 
             // Average quantities and store
             if (keep_averages_in_memory) {
-                m_tr.normalize(ngal, nqu, nsf);
-                ztr[itz]     = m_tr;
-                dndz[itz]    = ngal/dz;
-                dndz_qu[itz] = nqu/dz;
-                dndz_sf[itz] = nsf/dz;
+                m_tr /= ngal;
+                m_ml /= ngal;
+                m_ma /= ngal;
+
+                ztr[itz]  = m_tr;
+                zml[itz]  = m_ml;
+                zma[itz]  = m_ma;
+                dndz[itz] = ngal/dz;
             }
 
             // Write to disk the individual measurements
-            indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
             if (write_individuals) {
+                std::string indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
                 note("individuals file: ", indiv_filename);
 
                 file::mkdir(cache_dir);
                 fits::write_table(indiv_filename,
-                    "e1_true", get_e1(indiv_tr),
-                    "e2_true", get_e2(indiv_tr),
-                    "r2_true", get_r2(indiv_tr),
-                    "im",      indiv_id_mass,
-                    "it",      indiv_id_type,
-                    "ibt",     indiv_id_bt,
-                    "idisk",   indiv_id_disk,
-                    "ibulge",  indiv_id_bulge,
-                    "ngal",    indiv_ngal,
-                    "uv",      indiv_uv,
-                    "vj",      indiv_vj,
-                    "fdisk",   indiv_fdisk,
-                    "fbulge",  indiv_fbulge,
+                    "im",       indiv_id_mass,
+                    "it",       indiv_id_type,
+                    "ibt",      indiv_id_bt,
+                    "idisk",    indiv_id_disk,
+                    "ibulge",   indiv_id_bulge,
+                    "ngal",     indiv_ngal,
+                    "uv",       indiv_uv,
+                    "vj",       indiv_vj,
+                    "fdisk",    indiv_fdisk,
+                    "fbulge",   indiv_fbulge,
+                    "e1_true",  get_e1(indiv_tr),
+                    "e2_true",  get_e2(indiv_tr),
+                    "r2_true",  get_r2(indiv_tr),
+                    "e1_obs",   get_e1(indiv_ml),
+                    "e2_obs",   get_e2(indiv_ml),
+                    "r2_obs",   get_r2(indiv_ml),
+                    "e1_obsm",  get_e1(indiv_ma),
+                    "e2_obsm",  get_e2(indiv_ma),
+                    "r2_obsm",  get_r2(indiv_ma),
+                    "chi2_obs", indiv_chi2,
+                    "z_obs",    indiv_zml,
+                    "z_obsm",   indiv_zma,
                     "bands", tbands, "lambda", lambda, "m_grid", m, "bt_grid", bt, "z_true", zf
                 );
-            }
 
-            // Store results from fitter
-            finalize_redshift_slice(itz);
+                save_individuals(indiv_filename);
+            }
 
             if (global_progress_bar) {
                 progress(pgi);
@@ -635,20 +706,17 @@ public :
 
         // Average over N(z)
         if (keep_averages_in_memory) {
-            double ntot    = integrate(uzf, dndz);
-            double ntot_qu = integrate(uzf, dndz_qu);
-            double ntot_sf = integrate(uzf, dndz_sf);
-            m_tr = integrate(uzf, ztr, dndz/ntot, dndz_qu/ntot_qu, dndz_sf/ntot_sf);
+            double ntot = integrate(uzf, dndz);
+            m_tr = integrate(uzf, ztr*(dndz/ntot));
+            m_ml = integrate(uzf, zml*(dndz/ntot));
+            m_ma = integrate(uzf, zma*(dndz/ntot));
 
             // Save
             if (write_averages) {
-                to_fits("psf-mean-z"+to_string(iz)+"-tr.fits", m_tr,
-                    uzf, dndz, dndz_qu, dndz_sf, ztr
-                );
+                to_fits("psf-mean-z"+to_string(iz)+"-"+fitter+"-tr.fits", m_tr, uzf, dndz, ztr);
+                to_fits("psf-mean-z"+to_string(iz)+"-"+fitter+"-ml.fits", m_ml, uzf, dndz, zml);
+                to_fits("psf-mean-z"+to_string(iz)+"-"+fitter+"-ma.fits", m_ma, uzf, dndz, zma);
             }
-
-            // Save results from fitter
-            finalize_redshift_bin(iz, ntot, ntot_qu, ntot_sf);
         }
 
         return true;
