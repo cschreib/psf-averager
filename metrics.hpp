@@ -1,3 +1,10 @@
+#ifndef METRICS_INCLUDED
+#define METRICS_INCLUDED
+
+#include <vif.hpp>
+
+using namespace vif;
+
 // Average PSF metrics
 struct metrics {
     double q11 = 0, q12 = 0, q22 = 0;
@@ -122,3 +129,5 @@ void to_fits(std::string filename, const metrics& m,
 
     to_fits(filename, "", m, zm);
 }
+
+#endif
