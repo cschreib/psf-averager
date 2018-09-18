@@ -1,15 +1,17 @@
+#ifndef PSF_AVERAGER_PHOTOZ_INCLUDED
+#define PSF_AVERAGER_PHOTOZ_INCLUDED
+
 #include "egg-analytic.hpp"
+#include "fitter-base.hpp"
+#include "common.hpp"
 #include "metrics.hpp"
 
-struct mock_options {
+struct averager_options {
     double dz = 0.01;
     uint_t nzsplit = 0;
     uint_t nmc = 200;
-    uint_t seed = 42;
     vec1f depths;
-    double min_mag_err = 0.05;
     bool no_noise = false;
-    std::string psf_file;
     bool keep_individuals_in_memory = false;
     bool write_individuals = false;
     bool keep_averages_in_memory = false;
@@ -46,7 +48,7 @@ public :
     vec2f indiv_chi2, indiv_zml, indiv_zma;
 
     // Monochromatic PSF library
-    vec1d mono_lam, mono_q11, mono_q12, mono_q22, mono_w;
+    psf_moments& psf;
 
     // Observed SEDs
     vec1f save_sed_lambda;     // [nlam]
@@ -55,9 +57,6 @@ public :
     // EGG PSF library
     vec1d egg_q11, egg_q12, egg_q22;
     vec1d egg_fu, egg_fv, egg_fj, egg_fvis;
-
-    // Internal variables
-    vec2d mc;
 
     bool just_count = false;
     uint_t niter = 0;
@@ -70,18 +69,13 @@ public :
     vec1d zb = {0.001, 0.418, 0.560, 0.678, 0.789, 0.900, 1.019, 1.155, 1.324, 1.576, 2.500};
     double dz = 0.01;
     uint_t nzsplit = 0;
-    seed_t seed = make_seed(42);
     uint_t nband = npos, nmc = npos;
-    vec1f phot_err2;
-    double rel_err = dnan;
-    std::string psf_file;
-    filter_t psf_filter;
     double prob_limit = 0.1;
 
     bool single_pass = false;
     bool global_progress_bar = false;
 
-    const std::string fitter;
+    fitter_base& fitter;
 
     bool no_noise = false;
 
@@ -100,85 +94,102 @@ public :
     bool write_averages = false;
     bool save_seds = false;
 
-    psf_averager(const std::string& f) : egg::generator(), fitter(f) {}
+    explicit psf_averager(filter_database& db, psf_moments& pm, fitter_base& f) :
+        egg::generator(db), psf(pm), fitter(f) {}
 
-    void configure_mock(const mock_options& opts) {
+    void read_options(program_arguments& opts) {
+        egg::generator_options gopts;
+        averager_options aopts;
+
+        // Setup generator
+        gopts.bt_steps = 5;
+        gopts.logmass_max = 12.0;
+        gopts.logmass_steps = 50.0;
+        gopts.nthread = 0;
+
+        // Survey definition
+        gopts.maglim = 24.5;
+        gopts.selection_band = "euclid-vis";
+        gopts.filters = {"sdss-u", "sdss-g", "sdss-r", "sdss-i", "sdss-z", "vista-Y", "vista-J", "vista-H"};
+        aopts.depths =  {24.5,     24.4,     24.1,     24.1,     23.7,     23.2,     23.2,      23.2}; // 10 sigma
+        gopts.seds_step = 5;
+
+        // Averager options
+        aopts.nmc = 200;
+        aopts.dz = 0.01;
+        aopts.nzsplit = 0;
+        aopts.no_noise = false;
+        write_cache = false;
+        aopts.write_individuals = true;
+        aopts.write_averages = false;
+        aopts.cache_dir = "cache";
+        aopts.prob_limit = 0.1;
+        aopts.save_seds = false;
+        aopts.global_progress_bar = false;
+
+        // External data
+        gopts.share_dir = "/home/cschreib/code/egg-analytic/share/";
+        gopts.sed_lib = "/home/cschreib/code/egg-analytic/share/opt_lib_fastpp_hd_noigm.fits";
+        gopts.sed_lib_imf = "chabrier";
+
+        // Read custom configuration from command line
+        opts.read(arg_list(
+            gopts.share_dir, gopts.sed_lib, name(gopts.sed_lib_imf, "sed_imf"),
+            gopts.selection_band, gopts.filters, gopts.maglim, name(gopts.logmass_steps, "mass_steps"),
+            gopts.seds_step, gopts.nthread, write_cache, aopts.depths, aopts.nmc,
+            aopts.dz, aopts.nzsplit, aopts.no_noise, aopts.write_individuals,
+            aopts.write_averages, name(aopts.force_cache_id, "cache_id"), aopts.cache_dir,
+            aopts.prob_limit, aopts.save_seds, aopts.global_progress_bar
+        ));
+
+        // Adjust
+        if (aopts.write_individuals) {
+            aopts.keep_individuals_in_memory = true;
+            opts.write(arg_list(aopts.keep_individuals_in_memory));
+        }
+        if (aopts.write_averages) {
+            aopts.keep_averages_in_memory = true;
+            opts.write(arg_list(aopts.keep_averages_in_memory));
+        }
+        if (aopts.no_noise && aopts.nmc != 1) {
+            note("no_noise set, setting nmc=1");
+            aopts.nmc = 1;
+            opts.write(arg_list(aopts.nmc));
+        }
+
+        // Initialize
+        egg::generator::initialize(gopts);
+        initialize(aopts);
+    }
+
+    void initialize(const averager_options& aopts) {
         nband = filters.size();
-        dz = opts.dz;
-        nzsplit = opts.nzsplit;
-        zb = opts.zb;
-        no_noise = opts.no_noise;
-        psf_file = opts.psf_file;
-        keep_individuals_in_memory = opts.keep_individuals_in_memory;
-        write_individuals = opts.write_individuals;
-        keep_averages_in_memory = opts.keep_averages_in_memory;
-        write_averages = opts.write_averages;
-        force_cache_id = opts.force_cache_id;
-        cache_dir = file::directorize(opts.cache_dir);
-        prob_limit = opts.prob_limit;
+        dz = aopts.dz;
+        nzsplit = aopts.nzsplit;
+        zb = aopts.zb;
+        no_noise = aopts.no_noise;
+        keep_individuals_in_memory = aopts.keep_individuals_in_memory;
+        write_individuals = aopts.write_individuals;
+        keep_averages_in_memory = aopts.keep_averages_in_memory;
+        write_averages = aopts.write_averages;
+        force_cache_id = aopts.force_cache_id;
+        cache_dir = file::directorize(aopts.cache_dir);
+        prob_limit = aopts.prob_limit;
         if (prob_limit == 0.0) prob_limit = dnan;
-        save_seds = opts.save_seds;
-        global_progress_bar = opts.global_progress_bar;
+        save_seds = aopts.save_seds;
+        global_progress_bar = aopts.global_progress_bar;
+        nmc = aopts.nmc;
 
         if (save_seds) {
             file::mkdir("seds/");
             save_sed_lambda = rgen_step(0.1,2.0,0.001);
         }
 
-        if (write_individuals) {
-            keep_individuals_in_memory = true;
-        }
-        if (write_averages) {
-            keep_averages_in_memory = true;
-        }
-
-        // Square of photometric error (Gaussian additive component)
-        phot_err2 = sqr(mag2uJy(opts.depths)/10.0);
-        vif_check(phot_err2.size() == nband, "mismatch between filters (", nband, ") and depths (",
-            phot_err2.size(), ")");
-
-        // Relative error on flux, sets minimum uncertainties
-        rel_err = opts.min_mag_err*(log(10.0)/2.5);
-
-        // Cache random noise for re-use (same MC noise will be repeated for all galaxies)
-        nmc = opts.nmc;
-        seed = make_seed(opts.seed);
-
-        if (no_noise && nmc != 1) {
-            note("no_noise set, setting nmc=1");
-            nmc = 1;
-        }
-
-        // Set PSF filter
-        psf_filter = selection_filter;
-
-        // Read monochromatic PSF library
-        fits::read_table(psf_file,
-            "lambda", mono_lam, "w", mono_w, "q11", mono_q11, "q12", mono_q12, "q22", mono_q22
-        );
-
-        // Match it to the PSF filter
-        mono_w   = interpolate(mono_w,   mono_lam, selection_filter.lam);
-        mono_q11 = interpolate(mono_q11, mono_lam, selection_filter.lam);
-        mono_q12 = interpolate(mono_q12, mono_lam, selection_filter.lam);
-        mono_q22 = interpolate(mono_q22, mono_lam, selection_filter.lam);
-        mono_lam = selection_filter.lam;
-
-        // Ignore data outside of adopted bandpass (450-950)
-        mono_w[where(mono_lam < 0.450 || mono_lam > 0.950)] = 0.0;
-
-        // Include PSF weighting flux loss in PSF filter response
-        psf_filter.res *= mono_w;
-        psf_filter.res /= integrate(psf_filter.lam, psf_filter.res);
-
         // Compute actual rest-frame colors of EGG SEDs.
         filter_t rest_filter_u, rest_filter_v, rest_filter_j;
-        vif_check(read_filter("maiz-U",  rest_filter_u),
-            "could not find rest-frame filter U, aborting");
-        vif_check(read_filter("maiz-V",  rest_filter_v),
-            "could not find rest-frame filter V, aborting");
-        vif_check(read_filter("2mass-J", rest_filter_j),
-            "could not find rest-frame filter J, aborting");
+        rest_filter_u = filter_db.read_filter("maiz-U");
+        rest_filter_v = filter_db.read_filter("maiz-V");
+        rest_filter_j = filter_db.read_filter("2mass-J");
 
         auto compute_uvj = [&](uint_t ised, const vec1d& tlam, vec1d tsed) {
             tsed = lsun2uJy(0.0, 1.0, tlam, tsed);
@@ -207,22 +218,6 @@ public :
             }
         }
     }
-
-    struct fit_result {
-        explicit fit_result(uint_t n) {
-            chi2.resize(n);
-            z_obs.resize(n);
-            z_obsm.resize(n);
-            psf_obs.resize(n);
-            psf_obsm.resize(n);
-        }
-
-        vec1f chi2;
-        vec1f z_obs, z_obsm;
-        vec<1,metrics> psf_obs, psf_obsm;
-    };
-
-    virtual fit_result do_fit(uint_t iter, const vec1d& ftot) = 0;
 
     void on_generated(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
@@ -268,7 +263,7 @@ public :
             ftot.safe[l] = fdisk.safe[l+1] + fbulge.safe[l+1];
         }
 
-        fit_result fr = do_fit(iter, ftot);
+        fit_result fr = fitter.do_fit(iter, ftot);
 
         bool has_fit = !fr.z_obs.empty();
 
@@ -393,28 +388,6 @@ public :
         }
     }
 
-    virtual void initialize_fitter(double zf) {}
-
-    virtual void save_individuals(const std::string& filename) {}
-
-    virtual std::string make_cache_hash() = 0;
-
-    virtual void initialize_cache(fits::table& cache) {}
-
-    vec1d resample_sed(const vec1d& tlam, const vec1d& tsed) const {
-        const vec1d& blam = save_sed_lambda;
-        double dl = blam[1] - blam[0];
-        uint_t npt = blam.size();
-        vec1d fobs(npt);
-        for (uint_t l : range(npt)) {
-            if (blam.safe[l]-dl/2.0 > tlam.front() && blam.safe[l]+dl/2.0 < tlam.back()) {
-                fobs.safe[l] = integrate(tlam, tsed, blam.safe[l]-dl/2.0, blam.safe[l]+dl/2.0)/dl;
-            }
-        }
-
-        return fobs;
-    }
-
     bool average_redshift_bin(uint_t iz) {
         uint_t ntz;
         if (nzsplit != 0) {
@@ -458,14 +431,12 @@ public :
                 tlam *= (1.0 + zf);
 
                 if (save_seds) {
-                    save_sed_egg_fluxes(ised,_) = ML_cor*resample_sed(tlam, tsed);
+                    save_sed_egg_fluxes(ised,_) = ML_cor*resample_sed(tsed, tlam, save_sed_lambda);
                 }
 
-                double fvis    = sed2flux(psf_filter.lam, psf_filter.res, tlam, tsed);
-                egg_q11[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q11, tlam, tsed)/fvis;
-                egg_q12[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q12, tlam, tsed)/fvis;
-                egg_q22[ised]  = sed2flux(psf_filter.lam, psf_filter.res*mono_q22, tlam, tsed)/fvis;
-                egg_fvis[ised] = fvis;
+                psf.get_moments(
+                    tlam, tsed, egg_q11[ised], egg_q12[ised], egg_q22[ised], egg_fvis[ised]
+                );
             };
 
             if (single_sed_library) {
@@ -540,21 +511,21 @@ public :
                 note("done: ", niter);
             }
 
-            // Initialize fitter
-            initialize_fitter(zf);
+            // Prepare fitter
+            fitter.prepare_fit(niter, zf);
 
             // Initialize cache
             uint_t precision = ceil(max(-log10(dz), 2.0));
             std::string zid = replace(to_string(format::fixed(format::precision(zf, precision))), ".", "p");
             std::string cache_id;
             if (force_cache_id.empty()) {
-                cache_id = hash(make_cache_hash(), bands, phot_err2, nmc, niter);
+                cache_id = hash(fitter.make_cache_hash(), niter);
             } else {
                 cache_id = force_cache_id;
             }
 
             if (write_cache) {
-                cache_filename = cache_dir+"cache-"+fitter+"-z"+zid+"-"+cache_id+".fits";
+                cache_filename = cache_dir+"cache-"+fitter.code_name+"-z"+zid+"-"+cache_id+".fits";
                 note("cache file: ", cache_filename);
             }
 
@@ -612,7 +583,7 @@ public :
                 fitter_cache.write_columns("bands", tbands, "lambda", lambda);
 
                 // Let the fitter add its own data to the cache
-                initialize_cache(fitter_cache);
+                fitter.initialize_cache(fitter_cache, cache_mutex);
 
                 fitter_cache.flush();
 
@@ -639,13 +610,6 @@ public :
                 indiv_zma.resize(niter,nmc);
             }
 
-            // Initialize random numbers
-            mc = randomn(seed, nmc, nband);
-            // Subtract mean noise per band to ensure random photometry is unbiased
-            for (uint_t i : range(nband)) {
-                mc(_,i) -= mean(mc(_,i));
-            }
-
             // Compute averages at that redshift
             if (!global_progress_bar) {
                 pgi = progress_start(niter);
@@ -666,7 +630,7 @@ public :
 
             // Write to disk the individual measurements
             if (write_individuals) {
-                std::string indiv_filename = cache_dir+"indiv-"+fitter+"-z"+zid+"-"+cache_id+".fits";
+                std::string indiv_filename = cache_dir+"indiv-"+fitter.code_name+"-z"+zid+"-"+cache_id+".fits";
                 note("individuals file: ", indiv_filename);
 
                 file::mkdir(cache_dir);
@@ -696,7 +660,7 @@ public :
                     "bands", tbands, "lambda", lambda, "m_grid", m, "bt_grid", bt, "z_true", zf
                 );
 
-                save_individuals(indiv_filename);
+                fitter.save_individuals(indiv_filename);
             }
 
             if (global_progress_bar) {
@@ -713,12 +677,15 @@ public :
 
             // Save
             if (write_averages) {
-                to_fits("psf-mean-z"+to_string(iz)+"-"+fitter+"-tr.fits", m_tr, uzf, dndz, ztr);
-                to_fits("psf-mean-z"+to_string(iz)+"-"+fitter+"-ml.fits", m_ml, uzf, dndz, zml);
-                to_fits("psf-mean-z"+to_string(iz)+"-"+fitter+"-ma.fits", m_ma, uzf, dndz, zma);
+                std::string file_base = "psf-mean-z"+to_string(iz)+"-"+fitter.code_name;
+                to_fits(file_base+"-tr.fits", m_tr, uzf, dndz, ztr);
+                to_fits(file_base+"-ml.fits", m_ml, uzf, dndz, zml);
+                to_fits(file_base+"-ma.fits", m_ma, uzf, dndz, zma);
             }
         }
 
         return true;
     }
 };
+
+#endif
