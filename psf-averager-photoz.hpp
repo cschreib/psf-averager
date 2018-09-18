@@ -643,7 +643,7 @@ public :
             mc = randomn(seed, nmc, nband);
             // Subtract mean noise per band to ensure random photometry is unbiased
             for (uint_t i : range(nband)) {
-                mc(i,_) -= mean(mc(i,_));
+                mc(_,i) -= mean(mc(_,i));
             }
 
             // Compute averages at that redshift
