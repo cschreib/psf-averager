@@ -61,6 +61,8 @@ public :
             no_noise, name(tseed, "seed"), write_cache, psf_file, depths
         ));
 
+        vif_check(nmc == 1 || nmc % 2 == 0, "nmc must be 1 or an even number, got ", nmc);
+
         multi_threaded = nthread != 0;
 
         // Find flux filters
@@ -93,10 +95,14 @@ public :
         niter = tniter;
 
         // Initialize random numbers
-        mc = randomn(seed, nmc, nband);
-        // Subtract mean noise per band to ensure random photometry is unbiased
-        for (uint_t i : range(nband)) {
-            mc(_,i) -= mean(mc(_,i));
+        if (nmc <= 1) {
+            mc = randomn(seed, nmc, nband);
+        } else {
+            // Generate first half
+            mc = randomn(seed, nmc/2, nband);
+            // Make second half using negative of first half
+            // This ensures the noise distribution is symmetric and unbiased
+            append<0>(mc, -mc);
         }
 
         // Initialize implementation
