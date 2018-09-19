@@ -90,11 +90,7 @@ public :
         return "";
     }
 
-    void prepare_fit(uint_t tniter, double zf) {
-        // Set number of iterations
-        niter = tniter;
-
-        // Initialize random numbers
+    void reset_random() {
         if (nmc <= 1) {
             mc = randomn(seed, nmc, nband);
         } else {
@@ -104,6 +100,14 @@ public :
             // This ensures the noise distribution is symmetric and unbiased
             append<0>(mc, -mc);
         }
+    }
+
+    void prepare_fit(uint_t tniter, double zf) {
+        // Set number of iterations
+        niter = tniter;
+
+        // Initialize random numbers
+        reset_random();
 
         // Initialize implementation
         do_prepare_fit(zf);
