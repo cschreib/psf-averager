@@ -71,6 +71,7 @@ public :
     bool apply_igm = true;
     bool force_true_z = false;
     bool cache_save_pmodel = true;
+    bool no_prior = false;
     std::string sed_dir;
 
 
@@ -104,7 +105,7 @@ public :
             fopts.prior_filter, fopts.zfit_max, fopts.zfit_dz,
             fopts.apply_igm, fopts.force_true_z, fopts.min_mag_err, fopts.sed_dir, fopts.ninterp,
             fopts.use_capak_library, fopts.use_noline_library, fopts.use_egg_library,
-            fopts.cache_save_pmodel, fopts.gauss_convolve
+            fopts.cache_save_pmodel, fopts.gauss_convolve, no_prior
         ));
 
         initialize(fopts);
@@ -136,9 +137,11 @@ public :
             ninterp = 0;
         }
 
-        vif_check(is_any_of(fopts.prior_filter, bands),
-            "prior filter is not in the filter list ('", fopts.prior_filter, "' not found')");
-        id_prior = where_first(fopts.prior_filter == bands);
+        if (!no_prior) {
+            vif_check(is_any_of(fopts.prior_filter, bands),
+                "prior filter is not in the filter list ('", fopts.prior_filter, "' not found')");
+            id_prior = where_first(fopts.prior_filter == bands);
+        }
 
         // Setup redshift grid
         nzfit_base = ceil(fopts.zfit_max/fopts.zfit_dz);
@@ -187,7 +190,11 @@ public :
             bpz_seds = file::list_files(tsed_dir, "*.dat");
         }
 
-        // Sort BPZ SEDs by color (red to blue)
+        ntemplate = bpz_seds.size();
+
+        vif_check(ntemplate != 0, "could not find any template in '", tsed_dir, "'");
+
+        // Sort SEDs by color (red to blue)
         vec1d color(bpz_seds.size()); {
             for (uint_t t : range(bpz_seds)) {
                 vec1d rlam, rsed;
@@ -204,24 +211,30 @@ public :
             bpz_seds = bpz_seds[ids];
         }
 
-        ntemplate = bpz_seds.size();
+        if (!no_prior) {
+            // Split SEDs in classes
+            if (use_egg_library) {
+                // EGG SEDs, we do our best to find something that matches...
+                nelliptical = count(color <= 0.02);
+                nspiral = count(color > 0.02 && color <= 0.15);
+            } else {
+                // Standard set
+                // Capak: color = {0.0023, 0.036, 0.097, 0.21, 0.22, 0.41}
+                //                 Ell        Spirals       Irregulars
+                nelliptical = 1;
+                nspiral = 2;
+            }
 
-        // Split SEDs in classes
-        if (use_egg_library) {
-            // EGG SEDs, we do our best to find something that matches...
-            nelliptical = count(color <= 0.02);
-            nspiral = count(color > 0.02 && color <= 0.15);
+            nirregular = ntemplate - nelliptical - nspiral;
+
+            note("SEDs: ", nelliptical, " ellipticals, ",
+                           nspiral, " spirals, ",
+                           nirregular, " irregulars");
         } else {
-            // Standard set
-            // Capak: color = {0.0023, 0.036, 0.097, 0.21, 0.22, 0.41}
-            //                 Ell        Spirals       Irregulars
-            nelliptical = 1;
-            nspiral = 2;
+            nelliptical = ntemplate;
+            nspiral = 0;
+            nirregular = 0;
         }
-
-        nirregular = ntemplate - nelliptical - nspiral;
-
-        note("SEDs: ", nelliptical, " ellipticals, ", nspiral, " spirals, ", nirregular, " irregulars");
 
         nmodel_base = ntemplate*nzfit_base;
 
@@ -430,7 +443,9 @@ public :
         workspace& w = (multi_threaded ? local : global);
 
         // Setup priors
-        set_priors(w, ftot);
+        if (!no_prior) {
+            set_priors(w, ftot);
+        }
 
         // Create noise-free photometry
         for (uint_t l : range(nband)) {
@@ -549,14 +564,16 @@ public :
                 w.cache_pmodel.safe(i,im) = w.pmodel.safe[im];
             }
 
-            // Maximum likelihood
-            fr.psf_obs.safe[i] = metrics(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
+            if (!no_psf) {
+                // Maximum likelihood
+                fr.psf_obs.safe[i] = metrics(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
 
-            // Marginalization
-            metrics& tm = fr.psf_obsm.safe[i];
-            for (uint_t im : range(nmodel)) {
-                metrics ttm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
-                tm += w.cache_pmodel.safe(i,im)*ttm;
+                // Marginalization
+                metrics& tm = fr.psf_obsm.safe[i];
+                for (uint_t im : range(nmodel)) {
+                    metrics ttm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
+                    tm += w.cache_pmodel.safe(i,im)*ttm;
+                }
             }
         }
 
@@ -635,6 +652,10 @@ public :
 
         w.cache_bmodel.resize(nmc);
         w.cache_pmodel.resize(nmc, nmodel);
+
+        if (no_prior) {
+            w.prior[_] = 1.0;
+        }
     }
 
     void do_prepare_fit(double zf) override {
@@ -651,7 +672,7 @@ public :
 
         // Pre-compute BPZ template fluxes and PSF moments
         bool compute_moments = false;
-        if (force_true_z || bpz_q11.empty()) {
+        if (!no_psf && (force_true_z || bpz_q11.empty())) {
             bpz_q11.resize(nmodel);
             bpz_q12.resize(nmodel);
             bpz_q22.resize(nmodel);
