@@ -126,6 +126,16 @@ public :
 
     virtual fit_result do_fit(uint_t iter, const vec1d& ftot) = 0;
 
+    fit_result do_fit(uint_t iter, vec1d ftot, vec1d ferr) {
+        vec1u idb = where(!is_finite(ftot) || !is_finite(ferr) || ferr < 0);
+        ftot[idb] = 0;
+        ferr[idb] = 1e9;
+
+        phot_err2 = sqr(ferr);
+
+        return do_fit(iter, ftot);
+    }
+
     virtual void save_individuals(const std::string& filename) {}
 };
 
