@@ -122,7 +122,7 @@ public :
         apply_igm = fopts.apply_igm;
         force_true_z = fopts.force_true_z;
         cache_save_pmodel = fopts.cache_save_pmodel;
-        sed_dir = fopts.sed_dir;
+        sed_dir = file::directorize(fopts.sed_dir);
 
         // Kernel used to convolve the P(z) to wash out too small fluctuations
         gauss_convolve = fopts.gauss_convolve;
