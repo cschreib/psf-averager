@@ -28,6 +28,11 @@ public :
     // Config
     double rel_err = 0.0;
     std::string sed_fit;
+    bool save_seds = false;
+
+    // Internal variables
+    vec1f save_sed_lambda;
+    vec2f save_sed_fluxes;
 
 
     explicit star_fitter(filter_database& db, psf_moments& pm) : fitter_base(db, pm) {
@@ -40,7 +45,7 @@ public :
         // Library
         sed_fit = "/home/cschreib/data/fits/templates/PHOENIX-ACES-AGSS-COND-2011-resample.fits";
 
-        opts.read(arg_list(min_mag_err, sed_fit));
+        opts.read(arg_list(min_mag_err, sed_fit, save_seds));
 
         nband = filters.size();
 
@@ -53,10 +58,17 @@ public :
 
         nmodel = ntemplate = sed.dims[0];
 
+        if (save_seds) {
+            save_sed_lambda = rgen_step(0.1,2.0,0.001);
+        }
+
         tpl_flux.resize(nmodel, nband);
         star_q11.resize(nmodel);
         star_q12.resize(nmodel);
         star_q22.resize(nmodel);
+        if (save_seds) {
+            save_sed_fluxes.resize(nmodel, save_sed_lambda.size());
+        }
 
         for (uint_t it : range(ntemplate)) {
             vec1d olam = lam;
@@ -70,6 +82,11 @@ public :
                     flx = 0.0;
                 }
                 tpl_flux.safe(it,l) = flx;
+            }
+
+            // Resample SEDs on common grid
+            if (save_seds) {
+                save_sed_fluxes(it,_) = resample_sed(osed, olam, save_sed_lambda);
             }
 
             // Compute PSF moments
@@ -86,6 +103,22 @@ public :
         }
 
         workspace& w = (multi_threaded ? local : global);
+
+        vec1f berr;
+        vec2f bflx;
+        vec2f bflxm;
+        vec2f tsed;
+        if (save_seds) {
+            berr = sqrt(phot_err2 + sqr(ftot*rel_err));
+            bflx.resize(nmc,nband);
+            bflxm.resize(nmc,nband);
+            tsed.resize(nmc,save_sed_lambda.size());
+
+            for (uint_t i : range(nmc))
+            for (uint_t l : range(nband)) {
+                bflx.safe(i,l) = ftot.safe[l] + (no_noise ? 0.0 : berr.safe[l]*mc.safe(i,l));
+            }
+        }
 
         // Create noise-free photometry
         for (uint_t l : range(nband)) {
@@ -116,6 +149,7 @@ public :
             // Find best SED
             uint_t iml = npos;
             double bchi2 = finf;
+            double bscale = 0;
             for (uint_t im : range(nmodel)) {
                 double* wm = &w.wmodel.safe(im,0);
                 double* wf = &w.rflux.safe[0];
@@ -134,12 +168,28 @@ public :
 
                 if (tchi2 < bchi2) {
                     bchi2 = tchi2;
+                    bscale = scale;
                     iml = im;
                 }
             }
 
             fr.chi2.safe[i] = bchi2;
             fr.psf_obs.safe[i] = metrics(star_q11.safe[iml], star_q12.safe[iml], star_q22.safe[iml]);
+
+            if (save_seds) {
+                for (uint_t il : range(save_sed_lambda)) {
+                    tsed.safe(i,il) = bscale*save_sed_fluxes.safe(iml,il);
+                }
+
+                for (uint_t l : range(nband)) {
+                    bflxm.safe(i,l) = bscale*tpl_flux.safe(iml,l);
+                }
+            }
+        }
+
+        if (save_seds) {
+            fits::update_table("seds/sed_"+to_string(iter)+".fits", "sed_obs", tsed,
+                "flux_obs", bflx, "err_obs", berr, "flux_fit", bflxm);
         }
 
         return fr;
