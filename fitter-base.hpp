@@ -37,6 +37,7 @@ public :
     bool keep_individuals_in_memory = false;
     bool write_cache = false;
     bool no_noise = false;
+    bool no_psf = false;
     uint_t nmc = 200;
 
     // Internal variables
@@ -58,7 +59,7 @@ public :
 
         opts.read(arg_list(
             name(bands, "filters"), nthread, keep_individuals_in_memory, nmc,
-            no_noise, name(tseed, "seed"), write_cache, psf_file, depths
+            no_noise, name(tseed, "seed"), write_cache, psf_file, depths, no_psf
         ));
 
         vif_check(nmc == 1 || nmc % 2 == 0, "nmc must be 1 or an even number, got ", nmc);

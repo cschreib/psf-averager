@@ -714,7 +714,7 @@ public :
             }
 
             // Maximum likelihood
-            {
+            if (!no_psf) {
                 uint_t iz = w.cache_bestz.safe[i];
 
                 // Compute flux-weighted average moments for this model
@@ -736,7 +736,7 @@ public :
 
 
             // Marginalization
-            {
+            if (!no_psf) {
                 // Compute flux-weighted average moments for this model
                 double q11 = 0.0, q12 = 0.0, q22 = 0.0;
                 double wtot = 0.0;
@@ -982,7 +982,7 @@ public :
 
         // Pre-compute EAzY template fluxes and PSF moments
         bool compute_moments = false;
-        if (force_true_z || eazy_q11.empty()) {
+        if (!no_psf && (force_true_z || eazy_q11.empty())) {
             eazy_q11.resize(nmodel);
             eazy_q12.resize(nmodel);
             eazy_q22.resize(nmodel);
