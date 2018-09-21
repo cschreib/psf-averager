@@ -304,6 +304,9 @@ public :
         ntemplate = nsed = eazy_seds.size();
         if (limited_set > 0) {
             nsed = limited_set;
+            if (add_high_ew_template) {
+                ++nsed;
+            }
         }
 
         nmodel_base = ntemplate*nzfit_base;
