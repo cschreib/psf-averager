@@ -171,6 +171,11 @@ public :
             limited_set = 3;
         }
 
+        if (add_high_ew_template && limited_set == 0) {
+            add_high_ew_template = false;
+            warning("'add_high_ew_template' disabled when 'limited_set=0'");
+        }
+
         prior_filter = fopts.prior_filter;
         prior_file = fopts.prior_file;
         vif_check(is_any_of(prior_filter, bands),
