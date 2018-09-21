@@ -715,7 +715,7 @@ public :
                     double c = w.cache_bestc.safe(i,it);
                     if (c > 0.0) {
                         for (uint_t il : range(save_sed_lambda)) {
-                            osed(i,il) += c*save_sed_eazy_fluxes(it,iz,il);
+                            osed.safe(i,il) += c*save_sed_eazy_fluxes.safe(it,iz,il);
                         }
                     }
                 }
