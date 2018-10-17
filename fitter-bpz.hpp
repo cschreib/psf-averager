@@ -481,8 +481,8 @@ public :
             uint_t iml = npos;
             double bchi2 = finf;
             for (uint_t im : range(nmodel)) {
-                double* wm = &w.wmodel.safe(im,0);
-                double* wf = &w.rflux.safe[0];
+                const double* wm = &w.wmodel.safe(im,0);
+                const double* wf = &w.rflux.safe[0];
 
                 double wfm = 0.0;
                 for (uint_t l : range(nband)) {
