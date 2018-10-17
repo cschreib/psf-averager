@@ -111,7 +111,7 @@ public :
         gopts.maglim = 24.5;
         gopts.selection_band = "euclid-vis";
         gopts.filters = {"sdss-u", "sdss-g", "sdss-r", "sdss-i", "sdss-z", "vista-Y", "vista-J", "vista-H"};
-        aopts.depths =  {24.5,     24.4,     24.1,     24.1,     23.7,     23.2,     23.2,      23.2}; // 10 sigma
+        aopts.depths =  {24.5,     24.4,     24.1,     24.1,     23.7,     23.2,      23.2,      23.2}; // 10 sigma
         gopts.seds_step = 5;
 
         // Averager options
@@ -139,7 +139,7 @@ public :
             gopts.seds_step, gopts.nthread, write_cache, aopts.depths, aopts.nmc,
             aopts.dz, aopts.nzsplit, aopts.no_noise, aopts.write_individuals,
             aopts.write_averages, name(aopts.force_cache_id, "cache_id"), aopts.cache_dir,
-            aopts.prob_limit, aopts.save_seds, aopts.global_progress_bar
+            aopts.prob_limit, aopts.save_seds, aopts.global_progress_bar, aopts.zb
         ));
 
         // Adjust
@@ -421,6 +421,20 @@ public :
             double df = lumdist(zf, cosmo);
             const double ML_cor = e10(-interpolate({0.15,0.15,0.0,0.0,-0.6}, {0.0,0.45,1.3,6.0,8.0}, zf));
 
+            uint_t precision = ceil(max(-log10(dz), 2.0));
+            std::string zid = replace(to_string(format::fixed(format::precision(zf, precision))), ".", "p");
+            std::string cache_id;
+            if (force_cache_id.empty()) {
+                cache_id = hash(fitter.make_cache_hash(), niter);
+            } else {
+                cache_id = force_cache_id;
+            }
+
+            if (write_individuals) {
+                std::string indiv_filename = cache_dir+"indiv-"+fitter.code_name+"-z"+zid+"-"+cache_id+".fits";
+                if (file::exists(indiv_filename)) continue;
+            }
+
             // Compute PSF moments for each template in the library
             auto set_moments = [&](uint_t ised, vec1d tlam, vec1d tsed) {
                 if (!naive_igm) {
@@ -515,15 +529,6 @@ public :
             fitter.prepare_fit(niter, zf);
 
             // Initialize cache
-            uint_t precision = ceil(max(-log10(dz), 2.0));
-            std::string zid = replace(to_string(format::fixed(format::precision(zf, precision))), ".", "p");
-            std::string cache_id;
-            if (force_cache_id.empty()) {
-                cache_id = hash(fitter.make_cache_hash(), niter);
-            } else {
-                cache_id = force_cache_id;
-            }
-
             if (write_cache) {
                 cache_filename = cache_dir+"cache-"+fitter.code_name+"-z"+zid+"-"+cache_id+".fits";
                 note("cache file: ", cache_filename);
