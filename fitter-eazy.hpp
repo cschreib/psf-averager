@@ -419,8 +419,8 @@ public :
                 }
             }
 
-            double* wm = &w.wmodel.safe(0, 0);
-            double* wf = &w.rflux.safe[0];
+            const double* wm = &w.wmodel.safe(0, 0);
+            const double* wf = &w.rflux.safe[0];
 
             // Create alpha matrix
             for (uint_t it0 : range(ntemplate))
