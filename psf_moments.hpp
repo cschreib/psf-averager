@@ -33,7 +33,17 @@ struct psf_moments {
         mono_lam = filter.lam;
 
         // Ignore data outside of adopted bandpass (450-950)
-        mono_w[where(mono_lam < 0.450 || mono_lam > 0.950)] = 0.0;
+        // mono_w[where(mono_lam < 0.450 || mono_lam > 0.950)] = 0.0;
+        {
+            vec1u idi = where(mono_lam >= 0.450 && mono_lam <= 0.950);
+            mono_w = mono_w[idi];
+            mono_q11 = mono_q11[idi];
+            mono_q12 = mono_q12[idi];
+            mono_q22 = mono_q22[idi];
+            mono_lam = mono_lam[idi];
+            filter.res = filter.res[idi];
+            filter.lam = filter.lam[idi];
+        }
 
         // Include PSF weighting flux loss in PSF filter response
         filter.res *= mono_w;
@@ -51,11 +61,36 @@ struct psf_moments {
         q22  = sed2flux(filter.lam, filter.res*mono_q22, tlam, tsed)/ftot;
     }
 
+    void get_moments_same_grid(vec1d tsed,
+        double& q11, double& q12, double& q22, double& ftot) const {
+
+        vif_check(!filter.res.empty(), "uninitialized PSF moments");
+
+        tsed *= filter.res;
+        ftot = 0.0; q11 = 0.0; q12 = 0.0; q22 = 0.0;
+        for (uint_t l : range(1, filter.lam.size())) {
+            ftot += (tsed.safe[l]+tsed.safe[l-1]);
+            q11  += (tsed.safe[l]*mono_q11.safe[l]+tsed.safe[l-1]*mono_q11.safe[l-1]);
+            q12  += (tsed.safe[l]*mono_q12.safe[l]+tsed.safe[l-1]*mono_q12.safe[l-1]);
+            q22  += (tsed.safe[l]*mono_q22.safe[l]+tsed.safe[l-1]*mono_q22.safe[l-1]);
+        }
+
+        q11 /= ftot; q12 /= ftot; q22 /= ftot;
+    }
+
     void get_moments(const vec1d& tlam, const vec1d& tsed,
         double& q11, double& q12, double& q22) const {
 
         double ftot;
         get_moments(tlam, tsed, q11, q12, q22, ftot);
+    }
+
+
+    void get_moments_same_grid(vec1d tsed,
+        double& q11, double& q12, double& q22) const {
+
+        double ftot;
+        get_moments_same_grid(std::move(tsed), q11, q12, q22, ftot);
     }
 };
 
