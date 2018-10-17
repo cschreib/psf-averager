@@ -193,6 +193,7 @@ public :
         ntemplate = bpz_seds.size();
 
         vif_check(ntemplate != 0, "could not find any template in '", tsed_dir, "'");
+        note("found ", ntemplate, " templates for fitting");
 
         // Sort SEDs by color (red to blue)
         vec1d color(bpz_seds.size()); {
