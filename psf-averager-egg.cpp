@@ -75,7 +75,7 @@ int vif_main(int argc, char* argv[]) {
 
     // Average PSF metrics
     if (allbins) {
-        for (uint_t tiz : range(pavg.zb)) {
+        for (uint_t tiz : range(pavg.zb.size()-1)) {
             if (!pavg.average_redshift_bin(tiz)) return 1;
         }
     } else {
