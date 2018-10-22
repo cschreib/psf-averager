@@ -157,6 +157,8 @@ int vif_main(int argc, char* argv[]) {
     uint_t bi = where_first(fit_bands == "sdss-i");
     uint_t bz = where_first(fit_bands == "sdss-z");
 
+    uint_t id_bsnr = bi;
+
     if (!no_noise) {
         fits::read_table("compiled_noisy.fits", ftable(flux));
     } else {
@@ -192,10 +194,7 @@ int vif_main(int argc, char* argv[]) {
     auto get_psf = [&](const vec1d& flx) {
         package p;
 
-        double chi2_expected = flx.size();
-        double tprob = 0.0;
         double best_chi2 = dinf;
-        double best_prob = 0.0;
         double best_scale = 0.0;
 
         const double* ff = &flx.safe[0];
