@@ -13,9 +13,10 @@ int vif_main(int argc, char* argv[]) {
     bool no_noise = false;
     std::string dir = "/home/cschreib/work_psf/psf-averager/";
     std::string model_cube = "color_cube.fits";
+    uint_t step = 1;
 
     read_args(argc, argv, arg_list(
-        name(tinterp, "interp"), nthread, no_noise, dir, model_cube
+        name(tinterp, "interp"), nthread, no_noise, dir, model_cube, step
     ));
 
     dir = file::directorize(dir);
@@ -277,8 +278,6 @@ int vif_main(int argc, char* argv[]) {
     vec1d e1_marg(ngal);
     vec1d z_best(ngal);
     vec1u id_best(ngal);
-
-    uint_t step = 1;
 
     auto get_source_psf = [&](uint_t j) {
         uint_t i = j*step;
