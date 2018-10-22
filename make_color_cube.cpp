@@ -14,7 +14,23 @@ int vif_main(int argc, char* argv[]) {
     vec2f colors;
     vec2f fluxes;
 
+    // Define the colors to use
     vec1s cbands = {"sdss-g","sdss-r","sdss-i","sdss-z","vista-Y","vista-J","vista-H"};
+
+    // Define the width of color bins
+    uint_t nmag = 6;
+    uint_t nmag_riz = 12;
+    double dmag = 0.1;
+    double dmag_riz = 0.1;
+    bool smart_bin = false;
+
+    // Output file name
+    std::string write_associations;
+    std::string ofile = "color_cube.fits";
+
+    read_args(argc, argv, arg_list(cbands, nmag, nmag_riz, dmag, dmag_riz, ofile, smart_bin,
+        write_associations));
+
     vec1s cname;
 
     note("reading colors");
@@ -48,10 +64,6 @@ int vif_main(int argc, char* argv[]) {
     uint_t nb = bands_mb.size();
     uint_t ncol = cname.size();
 
-    // Define the width of color bins
-    double dmag = 0.2;
-    double dmag_riz = 0.1;
-
     // Train
     note("design bins");
 
@@ -59,20 +71,59 @@ int vif_main(int argc, char* argv[]) {
     vec<1,vec1f> bcenter(ncol);
     vec<1,vec1f> bwidth(ncol);
     for (uint_t i : range(ncol)) {
-        vec1f c = colors(_,i);
-        c = c[where(is_finite(c))];
-
-        // Get statistics about colors in training set
         // Color is clamped to 3 to avoid long tails toward +inf for dropouts
-        double mi = min(c);
-        double ma = max(c);
-        if (ma > 3.0) ma = 3.0;
+        vec1f c = colors(_,i);
+        c = min(c, 3.0);
 
-        double dm = dmag;
-        if (cname[i] == "sdss-r/sdss-i" || cname[i] == "sdss-i/sdss-z") dm = dmag_riz;
+        // Select good data points
+        vec1u ids = where(is_finite(c));
 
-        vec2f b = make_bins_from_edges(rgen_step(mi, ma, dm));
-        print(cname[i], ": ", mi, ", ", ma, ", ", b.dims[1]);
+        vec2f b;
+
+        if (smart_bin) {
+            // Sort data
+            ids = ids[sort(c[ids])];
+
+            // Define number of bins
+            uint_t nm = nmag;
+            if (cname[i] == "sdss-r/sdss-i" || cname[i] == "sdss-i/sdss-z") nm = nmag_riz;
+
+            // Define bins with constant number density (refine where there are lots of galaxies)
+            vec1d edges = {c[ids[0]]};
+            double acc_ngal = 0.0;
+            double ngal_step = total(ngal.safe[ids])/nm;
+            uint_t ig = 0;
+            while (ig < ids.size()) {
+                uint_t isg = ids.safe[ig];
+                acc_ngal += ngal.safe[isg];
+
+                if (acc_ngal > ngal_step*edges.size()) {
+                    edges.push_back(c.safe[isg]);
+                }
+
+                ++ig;
+            }
+
+            if (edges.size() != nm+1) {
+                edges.push_back(c[ids.back()]);
+            } else {
+                edges.back() = c[ids.back()];
+            }
+
+            print(cname[i], ": ", edges.size()-1, " : ", edges);
+            b = make_bins_from_edges(edges);
+        } else {
+            // Get bounds
+            double mi = min(c);
+            double ma = max(c);
+
+            // Define width of bins
+            double dm = dmag;
+            if (cname[i] == "sdss-r/sdss-i" || cname[i] == "sdss-i/sdss-z") dm = dmag_riz;
+
+            print(cname[i], ": ", mi, ", ", ma, ", ", b.dims[1]);
+            b = make_bins_from_edges(rgen_step(mi, ma, dm));
+        }
 
         bins[i] = b;
         bcenter[i] = bin_center(b);
@@ -91,6 +142,16 @@ int vif_main(int argc, char* argv[]) {
     mf.setup(bins);
 
     fits::input_table itbl("compiled_mb.fits");
+
+    if (!write_associations.empty()) {
+        fits::output_table otbl(write_associations);
+        otbl.allocate_column<uint_t>("id_true", ngal.size(), bins.size());
+    }
+
+    fits::table atbl;
+    if (!write_associations.empty()) {
+        atbl.open(write_associations);
+    }
 
     // Training data is loaded in chunks to avoid loading the entire data set in memory
     // at once, which could overflow the memory
@@ -118,7 +179,12 @@ int vif_main(int argc, char* argv[]) {
             if (!is_finite(f[0])) continue;
 
             // Find leaf of the tree with this color
-            auto& c = mf.insert(colors(i,_));
+            vec1u ik = mf.bin_key(colors(i,_));
+            if (!write_associations.empty()) {
+                atbl.update_elements("id_true", ik, fits::at(i,_));
+            }
+
+            auto& c = mf.insert_binned(ik);
 
             // Average stuff using number density as weighting
             double w = ngal[i];
@@ -161,12 +227,11 @@ int vif_main(int argc, char* argv[]) {
         c.z /= c.weight;
     });
 
-    // Save binned data
-    note("save tree");
-
-    std::string ofile = "color_cube.fits";
-
     uint_t ncell = mf.size();
+
+    // Save binned data
+    note("save tree (", ncell, " cells)");
+
 
     // First save meta data and allocate space
     {
