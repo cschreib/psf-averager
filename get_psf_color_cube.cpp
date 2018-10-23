@@ -14,9 +14,10 @@ int vif_main(int argc, char* argv[]) {
     std::string dir = "/home/cschreib/work_psf/psf-averager/";
     std::string model_cube = "color_cube.fits";
     uint_t step = 1;
+    std::string outfile;
 
     read_args(argc, argv, arg_list(
-        name(tinterp, "interp"), nthread, no_noise, dir, model_cube, step
+        name(tinterp, "interp"), nthread, no_noise, dir, model_cube, step, outfile
     ));
 
     dir = file::directorize(dir);
@@ -147,7 +148,7 @@ int vif_main(int argc, char* argv[]) {
         vif_check(idf[b] != npos, "could not find band '", fit_bands[b], "' in input catalog");
     }
 
-    // depths = depths[idf]; // TODO: uncomment me at some point!
+    depths = depths[idf];
 
     uint_t br = where_first(fit_bands == "sdss-r");
     uint_t bi = where_first(fit_bands == "sdss-i");
@@ -166,6 +167,7 @@ int vif_main(int argc, char* argv[]) {
         metrics best_prob;
         metrics marg;
         double z_best;
+        double z_marg;
         uint_t id_best;
     };
 
@@ -218,6 +220,8 @@ int vif_main(int argc, char* argv[]) {
             iz1 = niz-1;
         }
 
+        p.z_marg = 0;
+
         // Fit each model
         for (uint_t i : range(nmodel)) {
             const double* fm = &model_fluxes.safe(i,0);
@@ -265,10 +269,12 @@ int vif_main(int argc, char* argv[]) {
 
                 tprob += pmodel;
                 p.marg += model_psf.safe[i]*pmodel;
+                p.z_marg += model_z.safe[i]*pmodel;
             }
         }
 
         p.marg /= tprob;
+        p.z_marg /= tprob;
 
         return p;
     };
@@ -277,6 +283,7 @@ int vif_main(int argc, char* argv[]) {
     vec1d e1_best_prob(ngal);
     vec1d e1_marg(ngal);
     vec1d z_best(ngal);
+    vec1d z_marg(ngal);
     vec1u id_best(ngal);
 
     auto get_source_psf = [&](uint_t j) {
@@ -287,6 +294,7 @@ int vif_main(int argc, char* argv[]) {
         e1_marg[i] = p.marg.e1;
 
         z_best[i] = p.z_best;
+        z_marg[i] = p.z_marg;
         id_best[i] = p.id_best;
     };
 
@@ -304,8 +312,12 @@ int vif_main(int argc, char* argv[]) {
     std::string suffix = "";
     if (!no_noise) suffix = "_noisy";
 
-    fits::write_table("results_n"+suffix+".fits", ftable(
-        e1_best, e1_best_prob, e1_marg, z_best, id_best
+    if (outfile.empty()) {
+        outfile = "results_n"+suffix+".fits";
+    }
+
+    fits::write_table(outfile, ftable(
+        e1_best, e1_best_prob, e1_marg, z_best, z_marg, id_best
     ));
 
     return 0;
