@@ -134,7 +134,8 @@ public :
         }
 
         fits::table otbl(out);
-        std::mutex fits_mutex;
+        std::mutex read_mutex;
+        std::mutex write_mutex;
 
         // auto pgi = progress_start(niter);
         // for (uint_t iter : range(niter)) {
@@ -142,7 +143,7 @@ public :
             vec1d flux, flux_err;
 
             {
-                std::unique_lock<std::mutex> l(fits_mutex);
+                std::unique_lock<std::mutex> l(read_mutex);
 
                 itbl.read_elements("flux", flux, fits::at(iter,_));
                 if (!idf.empty()) {
@@ -161,7 +162,7 @@ public :
             fit_result fr = fitter.do_fit(iter, flux, flux_err);
 
             {
-                std::unique_lock<std::mutex> l(fits_mutex);
+                std::unique_lock<std::mutex> l(write_mutex);
 
                 if (no_noise) {
                     otbl.update_elements("chi2_obs", fr.chi2.safe[0], fits::at(iter));

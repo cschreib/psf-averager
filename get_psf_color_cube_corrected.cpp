@@ -251,10 +251,8 @@ int vif_main(int argc, char* argv[]) {
             // Save best chi2
             if (tchi2 < best_chi2) {
                 best_chi2 = tchi2;
-                p.best = model_psf.safe[i];
-                p.z_best = model_z.safe[i];
-                p.id_best = i;
                 best_scale = scale;
+                p.id_best = i;
             }
         }
 
