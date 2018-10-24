@@ -28,6 +28,9 @@ int vif_main(int argc, char* argv[]) {
         // Setup filter database
         db.read_options(opts);
 
+        // Setup PSF moments
+        psf.read_options(opts);
+
         // Setup input catalog
         wrap.read_options(opts);
 
