@@ -121,8 +121,8 @@ int vif_main(int argc, char* argv[]) {
             double dm = dmag;
             if (cname[i] == "sdss-r/sdss-i" || cname[i] == "sdss-i/sdss-z") dm = dmag_riz;
 
-            print(cname[i], ": ", mi, ", ", ma, ", ", b.dims[1]);
             b = make_bins_from_edges(rgen_step(mi, ma, dm));
+            print(cname[i], ": ", mi, ", ", ma, ", ", b.dims[1]);
         }
 
         bins[i] = b;
