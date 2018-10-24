@@ -13,6 +13,7 @@ struct fitter_options {
     double zfit_dz = 0.01;
     bool use_capak_library = true;
     bool use_egg_library = false;
+    bool use_eggpp_library = false;
     bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
@@ -67,6 +68,7 @@ public :
     uint_t ninterp = 0;
     bool use_capak_library = true;
     bool use_egg_library = false;
+    bool use_eggpp_library = false;
     bool use_noline_library = false;
     bool apply_igm = true;
     bool force_true_z = false;
@@ -97,6 +99,7 @@ public :
         fopts.use_capak_library = true;
         fopts.use_noline_library = false;
         fopts.use_egg_library = false;
+        fopts.use_eggpp_library = false;
 
         // Output
         fopts.cache_save_pmodel = false;
@@ -105,7 +108,7 @@ public :
             fopts.prior_filter, fopts.zfit_max, fopts.zfit_dz,
             fopts.apply_igm, fopts.force_true_z, fopts.min_mag_err, fopts.sed_dir, fopts.ninterp,
             fopts.use_capak_library, fopts.use_noline_library, fopts.use_egg_library,
-            fopts.cache_save_pmodel, fopts.gauss_convolve, no_prior
+            fopts.use_eggpp_library, fopts.cache_save_pmodel, fopts.gauss_convolve, no_prior
         ));
 
         initialize(fopts);
@@ -118,6 +121,7 @@ public :
         use_capak_library = fopts.use_capak_library;
         use_noline_library = fopts.use_noline_library;
         use_egg_library = fopts.use_egg_library;
+        use_eggpp_library = fopts.use_eggpp_library;
 
         // Options on the fit
         apply_igm = fopts.apply_igm;
@@ -170,7 +174,9 @@ public :
         // Locate SEDs
         std::string tsed_dir;
         if (use_egg_library) {
-            tsed_dir = "SED_egg/";
+            tsed_dir = "SED_EGG/";
+        } else if (use_eggpp_library) {
+            tsed_dir = "SED_EGG++/";
         } else {
             if (use_capak_library) {
                 if (use_noline_library) {
