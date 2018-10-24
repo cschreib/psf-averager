@@ -8,7 +8,7 @@ class fitter_wrapper {
 public :
     // Input SEDs
     uint_t niter = 0;
-    vec1f errors;
+    bool constant_error = false;
 
     // Config
     uint_t nthread = 0;
@@ -62,7 +62,8 @@ public :
                 "missing 'FLUX_ERR' column (or set depths=...)");
         } else {
             vif_check(depths.size() == bands.size(), "mismatch in depths and filters");
-            errors = mag2uJy(depths)/10.0;
+            fitter.phot_err2 = sqr(mag2uJy(depths)/10.0);
+            constant_error = true;
         }
 
         if (out.empty()) {
@@ -150,16 +151,19 @@ public :
                     flux = flux[idf];
                 }
 
-                if (errors.empty()) {
+                if (!constant_error) {
                     itbl.read_elements("flux_err", flux_err, fits::at(iter,_));
-                    flux_err = flux_err[idf];
-                } else {
-                    flux_err = errors;
+                    if (!idf.empty()) {
+                        flux_err = flux_err[idf];
+                    }
                 }
             }
 
             // Fit
-            fit_result fr = fitter.do_fit(iter, flux, flux_err);
+            fit_result fr = (constant_error ?
+                fitter.do_fit(iter, flux) :
+                fitter.do_fit(iter, flux, flux_err)
+            );
 
             {
                 std::unique_lock<std::mutex> l(write_mutex);
