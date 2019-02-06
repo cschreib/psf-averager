@@ -282,6 +282,9 @@ int vif_main(int argc, char* argv[]) {
     vec1d e1_best(ngal);
     vec1d e1_best_prob(ngal);
     vec1d e1_marg(ngal);
+    vec1d r2_best(ngal);
+    vec1d r2_best_prob(ngal);
+    vec1d r2_marg(ngal);
     vec1d z_best(ngal);
     vec1d z_marg(ngal);
     vec1u id_best(ngal);
@@ -292,6 +295,9 @@ int vif_main(int argc, char* argv[]) {
         e1_best[i] = p.best.e1;
         e1_best_prob[i] = p.best_prob.e1;
         e1_marg[i] = p.marg.e1;
+        r2_best[i] = p.best.r2;
+        r2_best_prob[i] = p.best_prob.r2;
+        r2_marg[i] = p.marg.r2;
 
         z_best[i] = p.z_best;
         z_marg[i] = p.z_marg;
@@ -317,7 +323,7 @@ int vif_main(int argc, char* argv[]) {
     }
 
     fits::write_table(outfile, ftable(
-        e1_best, e1_best_prob, e1_marg, z_best, z_marg, id_best
+        e1_best, e1_best_prob, e1_marg, r2_best, r2_best_prob, r2_marg, z_best, z_marg, id_best
     ));
 
     return 0;
