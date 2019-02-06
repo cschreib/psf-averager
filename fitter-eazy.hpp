@@ -776,7 +776,7 @@ public :
                     }
                 }
 
-                fr.psf_obsm.safe[i] = metrics(q11, q12, q22);
+                fr.psf_obsm.safe[i] = metrics(q11/wtot, q12/wtot, q22/wtot);
             }
         }
 
