@@ -60,10 +60,10 @@ int vif_main(int argc, char* argv[]) {
         }
 
         // Build PSF
-        double q11, q12, q22;
-        psf.get_moments_same_grid(flx, q11, q12, q22);
+        double q11, q12, q22, rlam, ftot;
+        psf.get_moments_same_grid(flx, q11, q12, q22, ftot, rlam);
 
-        return metrics(q11, q12, q22);
+        return metrics(q11, q12, q22, rlam);
     };
 
     // Read trained data cube
@@ -285,6 +285,9 @@ int vif_main(int argc, char* argv[]) {
     vec1d r2_best(ngal);
     vec1d r2_best_prob(ngal);
     vec1d r2_marg(ngal);
+    vec1d rlam_best(ngal);
+    vec1d rlam_best_prob(ngal);
+    vec1d rlam_marg(ngal);
     vec1d z_best(ngal);
     vec1d z_marg(ngal);
     vec1u id_best(ngal);
@@ -298,6 +301,9 @@ int vif_main(int argc, char* argv[]) {
         r2_best[i] = p.best.r2;
         r2_best_prob[i] = p.best_prob.r2;
         r2_marg[i] = p.marg.r2;
+        rlam_best[i] = p.best.rlam;
+        rlam_best_prob[i] = p.best_prob.rlam;
+        rlam_marg[i] = p.marg.rlam;
 
         z_best[i] = p.z_best;
         z_marg[i] = p.z_marg;
@@ -323,7 +329,9 @@ int vif_main(int argc, char* argv[]) {
     }
 
     fits::write_table(outfile, ftable(
-        e1_best, e1_best_prob, e1_marg, r2_best, r2_best_prob, r2_marg, z_best, z_marg, id_best
+        e1_best, e1_best_prob, e1_marg, r2_best, r2_best_prob, r2_marg,
+        rlam_best, rlam_best_prob, rlam_marg,
+        z_best, z_marg, id_best
     ));
 
     return 0;

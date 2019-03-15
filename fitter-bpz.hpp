@@ -24,7 +24,7 @@ struct fitter_options {
 class bpz_fitter : public fitter_base {
 public :
     // BPZ PSF library
-    vec1d bpz_q11, bpz_q12, bpz_q22;
+    vec1d bpz_q11, bpz_q12, bpz_q22, bpz_rlam;
 
     // Fit models
     vec1s bpz_seds;
@@ -573,13 +573,16 @@ public :
 
             if (!no_psf) {
                 // Maximum likelihood
-                fr.psf_obs.safe[i] = metrics(bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml]);
+                fr.psf_obs.safe[i] = metrics(
+                    bpz_q11.safe[iml], bpz_q12.safe[iml], bpz_q22.safe[iml], bpz_rlam.safe[iml]
+                );
 
                 // Marginalization
                 metrics& tm = fr.psf_obsm.safe[i];
                 for (uint_t im : range(nmodel)) {
-                    metrics ttm(bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im]);
-                    tm += w.cache_pmodel.safe(i,im)*ttm;
+                    tm += w.cache_pmodel.safe(i,im)*metrics(
+                        bpz_q11.safe[im], bpz_q12.safe[im], bpz_q22.safe[im], bpz_rlam.safe[im]
+                    );
                 }
             }
         }
@@ -683,6 +686,7 @@ public :
             bpz_q11.resize(nmodel);
             bpz_q12.resize(nmodel);
             bpz_q22.resize(nmodel);
+            bpz_rlam.resize(nmodel);
             compute_moments = true;
         }
 
@@ -723,10 +727,12 @@ public :
 
                     if (compute_moments) {
                         // Compute PSF moments
+                        double fvis;
                         psf.get_moments(
                             olam, osed,
                             bpz_q11.safe[iz*ntemplate+it], bpz_q12.safe[iz*ntemplate+it],
-                            bpz_q22.safe[iz*ntemplate+it]
+                            bpz_q22.safe[iz*ntemplate+it], fvis,
+                            bpz_rlam.safe[iz*ntemplate+it]
                         );
                     }
                 }

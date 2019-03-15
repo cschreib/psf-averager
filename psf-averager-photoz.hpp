@@ -55,7 +55,7 @@ public :
     vec2f save_sed_egg_fluxes; // [nsed,nlam]
 
     // EGG PSF library
-    vec1d egg_q11, egg_q12, egg_q22;
+    vec1d egg_q11, egg_q12, egg_q22, egg_rlam;
     vec1d egg_fu, egg_fv, egg_fj, egg_fvis;
 
     bool just_count = false;
@@ -242,7 +242,8 @@ public :
         metrics tr(
             egg_q11.safe[id_disk]*fbti + egg_q11.safe[id_bulge]*fbtn,
             egg_q12.safe[id_disk]*fbti + egg_q12.safe[id_bulge]*fbtn,
-            egg_q22.safe[id_disk]*fbti + egg_q22.safe[id_bulge]*fbtn
+            egg_q22.safe[id_disk]*fbti + egg_q22.safe[id_bulge]*fbtn,
+            egg_rlam.safe[id_disk]*fbti + egg_rlam.safe[id_bulge]*fbtn
         );
 
         // Compute actual UVJ colors
@@ -357,23 +358,28 @@ public :
             fitter_cache.update_elements("e1_true",   tr.e1,        fits::at(iter));
             fitter_cache.update_elements("e2_true",   tr.e2,        fits::at(iter));
             fitter_cache.update_elements("r2_true",   tr.r2,        fits::at(iter));
+            fitter_cache.update_elements("rlam_true", tr.rlam,      fits::at(iter));
 
             if (has_fit) {
-                fitter_cache.update_elements("chi2_obs",    fr.chi2,    fits::at(iter,_));
-                fitter_cache.update_elements("z_obs",       fr.z_obs,   fits::at(iter,_));
-                fitter_cache.update_elements("z_obsm",      fr.z_obsm,  fits::at(iter,_));
-                fitter_cache.update_elements("e1_obs",      ml.e1,      fits::at(iter));
-                fitter_cache.update_elements("e2_obs",      ml.e2,      fits::at(iter));
-                fitter_cache.update_elements("r2_obs",      ml.r2,      fits::at(iter));
-                fitter_cache.update_elements("e1_obsm",     ma.e1,      fits::at(iter));
-                fitter_cache.update_elements("e2_obsm",     ma.e2,      fits::at(iter));
-                fitter_cache.update_elements("r2_obsm",     ma.r2,      fits::at(iter));
-                fitter_cache.update_elements("e1_obs_err",  ml2.e1,     fits::at(iter));
-                fitter_cache.update_elements("e2_obs_err",  ml2.e2,     fits::at(iter));
-                fitter_cache.update_elements("r2_obs_err",  ml2.r2,     fits::at(iter));
-                fitter_cache.update_elements("e1_obsm_err", ma2.e1,     fits::at(iter));
-                fitter_cache.update_elements("e2_obsm_err", ma2.e2,     fits::at(iter));
-                fitter_cache.update_elements("r2_obsm_err", ma2.r2,     fits::at(iter));
+                fitter_cache.update_elements("chi2_obs",      fr.chi2,    fits::at(iter,_));
+                fitter_cache.update_elements("z_obs",         fr.z_obs,   fits::at(iter,_));
+                fitter_cache.update_elements("z_obsm",        fr.z_obsm,  fits::at(iter,_));
+                fitter_cache.update_elements("e1_obs",        ml.e1,      fits::at(iter));
+                fitter_cache.update_elements("e2_obs",        ml.e2,      fits::at(iter));
+                fitter_cache.update_elements("r2_obs",        ml.r2,      fits::at(iter));
+                fitter_cache.update_elements("rlam_obs",      ml.r2,      fits::at(iter));
+                fitter_cache.update_elements("e1_obsm",       ma.e1,      fits::at(iter));
+                fitter_cache.update_elements("e2_obsm",       ma.e2,      fits::at(iter));
+                fitter_cache.update_elements("r2_obsm",       ma.r2,      fits::at(iter));
+                fitter_cache.update_elements("rlam_obsm",     ma.r2,      fits::at(iter));
+                fitter_cache.update_elements("e1_obs_err",    ml2.e1,     fits::at(iter));
+                fitter_cache.update_elements("e2_obs_err",    ml2.e2,     fits::at(iter));
+                fitter_cache.update_elements("r2_obs_err",    ml2.r2,     fits::at(iter));
+                fitter_cache.update_elements("rlam_obs_err",  ml2.r2,     fits::at(iter));
+                fitter_cache.update_elements("e1_obsm_err",   ma2.e1,     fits::at(iter));
+                fitter_cache.update_elements("e2_obsm_err",   ma2.e2,     fits::at(iter));
+                fitter_cache.update_elements("r2_obsm_err",   ma2.r2,     fits::at(iter));
+                fitter_cache.update_elements("rlam_obsm_err", ma2.r2,     fits::at(iter));
             }
 
             fitter_cache.open(cache_filename);
@@ -449,7 +455,8 @@ public :
                 }
 
                 psf.get_moments(
-                    tlam, tsed, egg_q11[ised], egg_q12[ised], egg_q22[ised], egg_fvis[ised]
+                    tlam, tsed, egg_q11[ised], egg_q12[ised], egg_q22[ised],
+                    egg_fvis[ised], egg_rlam[ised]
                 );
             };
 
@@ -458,6 +465,7 @@ public :
                 egg_q12.resize(single_use.size());
                 egg_q22.resize(single_use.size());
                 egg_fvis.resize(single_use.size());
+                egg_rlam.resize(single_use.size());
 
                 if (save_seds) {
                     save_sed_egg_fluxes.resize(single_use.size(), save_sed_lambda.size());
@@ -472,6 +480,7 @@ public :
                 egg_q12.resize(use.size());
                 egg_q22.resize(use.size());
                 egg_fvis.resize(use.size());
+                egg_rlam.resize(use.size());
 
                 if (save_seds) {
                     save_sed_egg_fluxes.resize(use.size(), save_sed_lambda.size());
@@ -553,35 +562,39 @@ public :
                 fitter_cache.open(cache_filename);
 
                 // Create cache arrays
-                fitter_cache.allocate_column<uint_t>("im",     niter);
-                fitter_cache.allocate_column<uint_t>("it",     niter);
-                fitter_cache.allocate_column<uint_t>("idisk",  niter);
-                fitter_cache.allocate_column<uint_t>("ibulge", niter);
-                fitter_cache.allocate_column<uint_t>("ibt",    niter);
-                fitter_cache.allocate_column<float>("fbulge",  niter, nband+1);
-                fitter_cache.allocate_column<float>("fdisk",   niter, nband+1);
-                fitter_cache.allocate_column<float>("uv",      niter);
-                fitter_cache.allocate_column<float>("vj",      niter);
-                fitter_cache.allocate_column<float>("ngal",    niter);
-                fitter_cache.allocate_column<float>("e1_true", niter);
-                fitter_cache.allocate_column<float>("e2_true", niter);
-                fitter_cache.allocate_column<float>("r2_true", niter);
+                fitter_cache.allocate_column<uint_t>("im",       niter);
+                fitter_cache.allocate_column<uint_t>("it",       niter);
+                fitter_cache.allocate_column<uint_t>("idisk",    niter);
+                fitter_cache.allocate_column<uint_t>("ibulge",   niter);
+                fitter_cache.allocate_column<uint_t>("ibt",      niter);
+                fitter_cache.allocate_column<float>("fbulge",    niter, nband+1);
+                fitter_cache.allocate_column<float>("fdisk",     niter, nband+1);
+                fitter_cache.allocate_column<float>("uv",        niter);
+                fitter_cache.allocate_column<float>("vj",        niter);
+                fitter_cache.allocate_column<float>("ngal",      niter);
+                fitter_cache.allocate_column<float>("e1_true",   niter);
+                fitter_cache.allocate_column<float>("e2_true",   niter);
+                fitter_cache.allocate_column<float>("r2_true",   niter);
+                fitter_cache.allocate_column<float>("rlam_true", niter);
 
-                fitter_cache.allocate_column<float>("chi2_obs",    niter, nmc);
-                fitter_cache.allocate_column<float>("z_obs",       niter, nmc);
-                fitter_cache.allocate_column<float>("z_obsm",      niter, nmc);
-                fitter_cache.allocate_column<float>("e1_obs",      niter);
-                fitter_cache.allocate_column<float>("e2_obs",      niter);
-                fitter_cache.allocate_column<float>("r2_obs",      niter);
-                fitter_cache.allocate_column<float>("e1_obsm",     niter);
-                fitter_cache.allocate_column<float>("e2_obsm",     niter);
-                fitter_cache.allocate_column<float>("r2_obsm",     niter);
-                fitter_cache.allocate_column<float>("e1_obs_err",  niter);
-                fitter_cache.allocate_column<float>("e2_obs_err",  niter);
-                fitter_cache.allocate_column<float>("r2_obs_err",  niter);
-                fitter_cache.allocate_column<float>("e1_obsm_err", niter);
-                fitter_cache.allocate_column<float>("e2_obsm_err", niter);
-                fitter_cache.allocate_column<float>("r2_obsm_err", niter);
+                fitter_cache.allocate_column<float>("chi2_obs",      niter, nmc);
+                fitter_cache.allocate_column<float>("z_obs",         niter, nmc);
+                fitter_cache.allocate_column<float>("z_obsm",        niter, nmc);
+                fitter_cache.allocate_column<float>("e1_obs",        niter);
+                fitter_cache.allocate_column<float>("e2_obs",        niter);
+                fitter_cache.allocate_column<float>("r2_obs",        niter);
+                fitter_cache.allocate_column<float>("rlam_obs",      niter);
+                fitter_cache.allocate_column<float>("e1_obsm",       niter);
+                fitter_cache.allocate_column<float>("e2_obsm",       niter);
+                fitter_cache.allocate_column<float>("r2_obsm",       niter);
+                fitter_cache.allocate_column<float>("rlam_obsm",     niter);
+                fitter_cache.allocate_column<float>("e1_obs_err",    niter);
+                fitter_cache.allocate_column<float>("e2_obs_err",    niter);
+                fitter_cache.allocate_column<float>("r2_obs_err",    niter);
+                fitter_cache.allocate_column<float>("rlam_obs_err",  niter);
+                fitter_cache.allocate_column<float>("e1_obsm_err",   niter);
+                fitter_cache.allocate_column<float>("e2_obsm_err",   niter);
+                fitter_cache.allocate_column<float>("rlam_obsm_err", niter);
 
                 // Save meta data
                 fitter_cache.write_columns("m_grid", m, "bt_grid", bt);
@@ -640,28 +653,31 @@ public :
 
                 file::mkdir(cache_dir);
                 fits::write_table(indiv_filename,
-                    "im",       indiv_id_mass,
-                    "it",       indiv_id_type,
-                    "ibt",      indiv_id_bt,
-                    "idisk",    indiv_id_disk,
-                    "ibulge",   indiv_id_bulge,
-                    "ngal",     indiv_ngal,
-                    "uv",       indiv_uv,
-                    "vj",       indiv_vj,
-                    "fdisk",    indiv_fdisk,
-                    "fbulge",   indiv_fbulge,
-                    "e1_true",  get_e1(indiv_tr),
-                    "e2_true",  get_e2(indiv_tr),
-                    "r2_true",  get_r2(indiv_tr),
-                    "e1_obs",   get_e1(indiv_ml),
-                    "e2_obs",   get_e2(indiv_ml),
-                    "r2_obs",   get_r2(indiv_ml),
-                    "e1_obsm",  get_e1(indiv_ma),
-                    "e2_obsm",  get_e2(indiv_ma),
-                    "r2_obsm",  get_r2(indiv_ma),
-                    "chi2_obs", indiv_chi2,
-                    "z_obs",    indiv_zml,
-                    "z_obsm",   indiv_zma,
+                    "im",        indiv_id_mass,
+                    "it",        indiv_id_type,
+                    "ibt",       indiv_id_bt,
+                    "idisk",     indiv_id_disk,
+                    "ibulge",    indiv_id_bulge,
+                    "ngal",      indiv_ngal,
+                    "uv",        indiv_uv,
+                    "vj",        indiv_vj,
+                    "fdisk",     indiv_fdisk,
+                    "fbulge",    indiv_fbulge,
+                    "e1_true",   get_e1(indiv_tr),
+                    "e2_true",   get_e2(indiv_tr),
+                    "r2_true",   get_r2(indiv_tr),
+                    "rlam_true", get_rlam(indiv_tr),
+                    "e1_obs",    get_e1(indiv_ml),
+                    "e2_obs",    get_e2(indiv_ml),
+                    "r2_obs",    get_r2(indiv_ml),
+                    "rlam_obs",  get_rlam(indiv_ml),
+                    "e1_obsm",   get_e1(indiv_ma),
+                    "e2_obsm",   get_e2(indiv_ma),
+                    "r2_obsm",   get_r2(indiv_ma),
+                    "rlam_obsm", get_rlam(indiv_ma),
+                    "chi2_obs",  indiv_chi2,
+                    "z_obs",     indiv_zml,
+                    "z_obsm",    indiv_zma,
                     "bands", tbands, "lambda", lambda, "m_grid", m, "bt_grid", bt, "z_true", zf
                 );
 

@@ -9,13 +9,14 @@ using namespace vif;
 struct metrics {
     double q11 = 0, q12 = 0, q22 = 0;
     double e1 = 0, e2 = 0, r2 = 0;
+    double rlam = 0;
 
     metrics() = default;
 
     metrics(double) {} // to enable integrate()
 
-    explicit metrics(double t11, double t12, double t22) :
-        q11(t11), q12(t12), q22(t22) {
+    explicit metrics(double t11, double t12, double t22, double rl) :
+        q11(t11), q12(t12), q22(t22), rlam(rl) {
         get_ellipticities();
     }
 
@@ -28,30 +29,35 @@ struct metrics {
     metrics& operator *= (double norm) {
         q11 *= norm; q12 *= norm; q22 *= norm;
         e1 *= norm; e2 *= norm; r2 *= norm;
+        rlam *= norm;
         return *this;
     }
 
     metrics& operator *= (const metrics& m) {
         q11 *= m.q11; q12 *= m.q12; q22 *= m.q22;
         e1 *= m.e1; e2 *= m.e2; r2 *= m.r2;
+        rlam *= m.rlam;
         return *this;
     }
 
     metrics& operator /= (double norm) {
         q11 /= norm; q12 /= norm; q22 /= norm;
         e1 /= norm; e2 /= norm; r2 /= norm;
+        rlam /= norm;
         return *this;
     }
 
     metrics& operator += (const metrics& m) {
         q11 += m.q11; q12 += m.q12; q22 += m.q22;
         e1 += m.e1; e2 += m.e2; r2 += m.r2;
+        rlam += m.rlam;
         return *this;
     }
 
     metrics& operator -= (const metrics& m) {
         q11 -= m.q11; q12 -= m.q12; q22 -= m.q22;
         e1 -= m.e1; e2 -= m.e2; r2 -= m.r2;
+        rlam -= m.rlam;
         return *this;
     }
 
@@ -83,6 +89,7 @@ metrics sqrt(metrics m) {
     m.e1 = sqrt(m.e1);
     m.e2 = sqrt(m.e2);
     m.r2 = sqrt(m.r2);
+    m.rlam = sqrt(m.rlam);
     return m;
 }
 
@@ -109,16 +116,20 @@ auto get_e2 = vectorize_lambda([](const metrics& n) {
 auto get_r2 = vectorize_lambda([](const metrics& n) {
     return n.r2;
 });
-
+auto get_rlam = vectorize_lambda([](const metrics& n) {
+    return n.rlam;
+});
 
 void to_fits(std::string filename, std::string suffix, const metrics& m, const vec<1,metrics>& zm) {
     fits::update_table(filename,
         "tot_q11"+suffix, m.q11, "tot_q12"+suffix, m.q12, "tot_q22"+suffix, m.q22,
-        "tot_e1"+suffix, m.e1, "tot_e2"+suffix, m.e2, "tot_r2"+suffix, m.r2
+        "tot_e1"+suffix, m.e1, "tot_e2"+suffix, m.e2, "tot_r2"+suffix, m.r2,
+        "tot_rlam"+suffix, m.rlam
     );
     fits::update_table(filename,
         "z_q11"+suffix, get_q11(zm), "z_q12"+suffix, get_q12(zm), "z_q22"+suffix, get_q22(zm),
-        "z_e1"+suffix, get_e1(zm), "z_e2"+suffix, get_e2(zm), "z_r2"+suffix, get_r2(zm)
+        "z_e1"+suffix, get_e1(zm), "z_e2"+suffix, get_e2(zm), "z_r2"+suffix, get_r2(zm),
+        "z_rlam"+suffix, get_rlam(zm)
     );
 }
 

@@ -35,7 +35,7 @@ public :
     vec3u indiv_seds;
 
     // EAzY PSF library
-    vec1d eazy_q11, eazy_q12, eazy_q22;
+    vec1d eazy_q11, eazy_q12, eazy_q22, eazy_rlam;
     vec1d eazy_fvis;
 
     // EAzY SEDs
@@ -257,12 +257,12 @@ public :
                     vec1d th = atan2(suv - muv, svj - mvj);
                     vec1u idc = where(keep && !center);
                     idc = idc[sort(th[idc])];
-                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0;
+                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0u;
 
                     // Sort by VJ for center
                     idc = where(keep && center);
                     idc = idc[sort(svj[idc])];
-                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0;
+                    keep[idc] = indgen(idc.size()) % egg_sed_step == 0u;
                 }
 
                 eazy_seds = eazy_seds[where(keep)];
@@ -270,7 +270,7 @@ public :
 
             } else if (egg_sed_step > 1) {
                 // Remove some SEDs to save time
-                eazy_seds = eazy_seds[where((suv + svj) % egg_sed_step == 0)];
+                eazy_seds = eazy_seds[where((suv + svj) % egg_sed_step == 0u)];
                 vif_check(!eazy_seds.empty(), "no SED left after skipping, reduce 'egg_sed_step'");
             }
 
@@ -726,7 +726,7 @@ public :
                 uint_t iz = w.cache_bestz.safe[i];
 
                 // Compute flux-weighted average moments for this model
-                double q11 = 0.0, q12 = 0.0, q22 = 0.0;
+                double q11 = 0.0, q12 = 0.0, q22 = 0.0, rlam = 0.0;
                 double wtot = 0.0;
                 for (uint_t it : range(ntemplate)) {
                     uint_t im = iz*ntemplate + it;
@@ -737,16 +737,17 @@ public :
                     q11 += tw*eazy_q11.safe[im];
                     q12 += tw*eazy_q12.safe[im];
                     q22 += tw*eazy_q22.safe[im];
+                    rlam += tw*eazy_rlam.safe[im];
                 }
 
-                fr.psf_obs.safe[i] = metrics(q11/wtot, q12/wtot, q22/wtot);
+                fr.psf_obs.safe[i] = metrics(q11/wtot, q12/wtot, q22/wtot, rlam/wtot);
             }
 
 
             // Marginalization
             if (!no_psf) {
                 // Compute flux-weighted average moments for this model
-                double q11 = 0.0, q12 = 0.0, q22 = 0.0;
+                double q11 = 0.0, q12 = 0.0, q22 = 0.0, rlam = 0.0;
                 double wtot = 0.0;
 
                 for (uint_t iz : range(nzfit)) {
@@ -761,6 +762,7 @@ public :
                             q11 += tw*eazy_q11.safe[im];
                             q12 += tw*eazy_q12.safe[im];
                             q22 += tw*eazy_q22.safe[im];
+                            rlam += tw*eazy_rlam.safe[im];
                         }
                     } else {
                         for (uint_t it : range(ntemplate)) {
@@ -772,11 +774,12 @@ public :
                             q11 += tw*eazy_q11.safe[im];
                             q12 += tw*eazy_q12.safe[im];
                             q22 += tw*eazy_q22.safe[im];
+                            rlam += tw*eazy_rlam.safe[im];
                         }
                     }
                 }
 
-                fr.psf_obsm.safe[i] = metrics(q11/wtot, q12/wtot, q22/wtot);
+                fr.psf_obsm.safe[i] = metrics(q11/wtot, q12/wtot, q22/wtot, rlam/wtot);
             }
         }
 
@@ -995,6 +998,7 @@ public :
             eazy_q12.resize(nmodel);
             eazy_q22.resize(nmodel);
             eazy_fvis.resize(nmodel);
+            eazy_rlam.resize(nmodel);
             compute_moments = true;
         }
 
@@ -1040,7 +1044,8 @@ public :
                         // Compute PSF moments
                         psf.get_moments(olam, osed,
                             eazy_q11.safe[iz*ntemplate+it], eazy_q12.safe[iz*ntemplate+it],
-                            eazy_q22.safe[iz*ntemplate+it], eazy_fvis.safe[iz*ntemplate+it]
+                            eazy_q22.safe[iz*ntemplate+it], eazy_fvis.safe[iz*ntemplate+it],
+                            eazy_rlam.safe[iz*ntemplate+it]
                         );
                     }
 
