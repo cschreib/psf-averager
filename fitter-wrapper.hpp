@@ -117,19 +117,22 @@ public :
 
             if (!no_psf) {
                 if (no_noise) {
-                    otbl.allocate_column<float>("e1_obs", niter);
-                    otbl.allocate_column<float>("e2_obs", niter);
-                    otbl.allocate_column<float>("r2_obs", niter);
-                    otbl.allocate_column<float>("e1_obsm", niter);
-                    otbl.allocate_column<float>("e2_obsm", niter);
-                    otbl.allocate_column<float>("r2_obsm", niter);
+                    otbl.allocate_column<float>("e1_obs",    niter);
+                    otbl.allocate_column<float>("e2_obs",    niter);
+                    otbl.allocate_column<float>("r2_obs",    niter);
+                    otbl.allocate_column<float>("rlam_obs",  niter);
+                    otbl.allocate_column<float>("e1_obsm",   niter);
+                    otbl.allocate_column<float>("e2_obsm",   niter);
+                    otbl.allocate_column<float>("r2_obsm",   niter);
+                    otbl.allocate_column<float>("rlam_obsm", niter);
                 } else {
-                    otbl.allocate_column<float>("e1_obs", niter, nmc);
-                    otbl.allocate_column<float>("e2_obs", niter, nmc);
-                    otbl.allocate_column<float>("r2_obs", niter, nmc);
-                    otbl.allocate_column<float>("e1_obsm", niter, nmc);
-                    otbl.allocate_column<float>("e2_obsm", niter, nmc);
-                    otbl.allocate_column<float>("r2_obsm", niter, nmc);
+                    otbl.allocate_column<float>("e1_obs",    niter, nmc);
+                    otbl.allocate_column<float>("e2_obs",    niter, nmc);
+                    otbl.allocate_column<float>("r2_obs",    niter, nmc);
+                    otbl.allocate_column<float>("rlam_obs",  niter, nmc);
+                    otbl.allocate_column<float>("e1_obsm",   niter, nmc);
+                    otbl.allocate_column<float>("e2_obsm",   niter, nmc);
+                    otbl.allocate_column<float>("rlam_obsm", niter, nmc);
                 }
             }
         }
@@ -138,8 +141,6 @@ public :
         std::mutex read_mutex;
         std::mutex write_mutex;
 
-        // auto pgi = progress_start(niter);
-        // for (uint_t iter : range(niter)) {
         auto do_source = [&](uint_t iter) {
             vec1d flux, flux_err;
 
@@ -180,26 +181,27 @@ public :
 
                 if (!no_psf) {
                     if (no_noise) {
-                        otbl.update_elements("e1_obs", fr.psf_obs.safe[0].e1, fits::at(iter));
-                        otbl.update_elements("e2_obs", fr.psf_obs.safe[0].e2, fits::at(iter));
-                        otbl.update_elements("r2_obs", fr.psf_obs.safe[0].r2, fits::at(iter));
-                        otbl.update_elements("e1_obsm", fr.psf_obsm.safe[0].e1, fits::at(iter));
-                        otbl.update_elements("e2_obsm", fr.psf_obsm.safe[0].e2, fits::at(iter));
-                        otbl.update_elements("r2_obsm", fr.psf_obsm.safe[0].r2, fits::at(iter));
+                        otbl.update_elements("e1_obs",    fr.psf_obs.safe[0].e1,    fits::at(iter));
+                        otbl.update_elements("e2_obs",    fr.psf_obs.safe[0].e2,    fits::at(iter));
+                        otbl.update_elements("r2_obs",    fr.psf_obs.safe[0].r2,    fits::at(iter));
+                        otbl.update_elements("rlam_obs",  fr.psf_obs.safe[0].rlam,  fits::at(iter));
+                        otbl.update_elements("e1_obsm",   fr.psf_obsm.safe[0].e1,   fits::at(iter));
+                        otbl.update_elements("e2_obsm",   fr.psf_obsm.safe[0].e2,   fits::at(iter));
+                        otbl.update_elements("r2_obsm",   fr.psf_obsm.safe[0].r2,   fits::at(iter));
+                        otbl.update_elements("rlam_obsm", fr.psf_obsm.safe[0].rlam, fits::at(iter));
                     } else {
-                        otbl.update_elements("e1_obs", get_e1(fr.psf_obs), fits::at(iter,_));
-                        otbl.update_elements("e2_obs", get_e2(fr.psf_obs), fits::at(iter,_));
-                        otbl.update_elements("r2_obs", get_r2(fr.psf_obs), fits::at(iter,_));
-                        otbl.update_elements("e1_obsm", get_e1(fr.psf_obsm), fits::at(iter,_));
-                        otbl.update_elements("e2_obsm", get_e2(fr.psf_obsm), fits::at(iter,_));
-                        otbl.update_elements("r2_obsm", get_r2(fr.psf_obsm), fits::at(iter,_));
+                        otbl.update_elements("e1_obs",    get_e1(fr.psf_obs),    fits::at(iter,_));
+                        otbl.update_elements("e2_obs",    get_e2(fr.psf_obs),    fits::at(iter,_));
+                        otbl.update_elements("r2_obs",    get_r2(fr.psf_obs),    fits::at(iter,_));
+                        otbl.update_elements("rlam_obs",  get_rlam(fr.psf_obs),  fits::at(iter,_));
+                        otbl.update_elements("e1_obsm",   get_e1(fr.psf_obsm),   fits::at(iter,_));
+                        otbl.update_elements("e2_obsm",   get_e2(fr.psf_obsm),   fits::at(iter,_));
+                        otbl.update_elements("r2_obsm",   get_r2(fr.psf_obsm),   fits::at(iter,_));
+                        otbl.update_elements("rlam_obsm", get_rlam(fr.psf_obsm), fits::at(iter,_));
                     }
                 }
             }
         };
-
-            // progress(pgi);
-        // }
 
         thread::parallel_for pfor(nthread);
         pfor.verbose = true;
