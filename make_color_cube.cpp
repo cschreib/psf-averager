@@ -27,21 +27,27 @@ int vif_main(int argc, char* argv[]) {
     // Output file name
     std::string write_associations;
     std::string ofile = "color_cube.fits";
+    std::string suffix;
 
     read_args(argc, argv, arg_list(cbands, nmag, nmag_riz, dmag, dmag_riz, ofile, smart_bin,
-        write_associations));
+        write_associations, suffix));
+
+    if (!suffix.empty() && suffix[0] != '-') suffix = '-'+suffix;
 
     vec1s cname;
 
     note("reading colors");
 
+    vec1d norm;
+
     {
         vec1s bands;
         vec2f flux;
-        fits::read_table("compiled.fits", ftable(ngal, flux, bands, z));
-        fits::read_table("compiled_mb.fits", "bands", bands_mb, "lambda", lambda_mb);
+        fits::read_table("compiled"+suffix+".fits", ftable(ngal, flux, bands, z));
+        fits::read_table("compiled_mb"+suffix+".fits", "bands", bands_mb, "lambda", lambda_mb);
 
         // Read in broad band fluxes
+        norm.resize(flux.dims[0]);
         fluxes.resize(flux.dims[0], cbands.size());
         for (uint_t b : range(cbands)) {
             fluxes(_,b) = flux(_,where_first(bands == cbands[b]));
@@ -49,7 +55,8 @@ int vif_main(int argc, char* argv[]) {
 
         // Normalize to unit flux at reddest band
         for (uint_t i : range(ngal)) {
-            fluxes(i,_) /= fluxes(i,cbands.size()-1);
+            norm[i] = fluxes(i,cbands.size()-1);
+            fluxes(i,_) /= norm[i];
         }
 
         // Compute colors
@@ -141,7 +148,7 @@ int vif_main(int argc, char* argv[]) {
     tree<float,cell> mf;
     mf.setup(bins);
 
-    fits::input_table itbl("compiled_mb.fits");
+    fits::input_table itbl("compiled_mb"+suffix+".fits");
 
     if (!write_associations.empty()) {
         fits::output_table otbl(write_associations);
@@ -173,7 +180,7 @@ int vif_main(int argc, char* argv[]) {
         for (uint_t i : cids) {
             vec1f f;
             itbl.read_elements("flux", f, fits::at(i,_));
-            f /= mean(f);
+            f /= norm[i];
 
             // Remove invalid data (z=0 galaxies typically)
             if (!is_finite(f[0])) continue;

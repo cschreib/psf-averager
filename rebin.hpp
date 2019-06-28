@@ -325,6 +325,11 @@ vec<1,TypeY> rebin_mcspline(const vec<1,TypeY>& y, const vec<1,TypeX>& x, const 
     return data;
 }
 
+template<typename TypeY, typename TypeX, typename TypeN>
+vec<1,TypeY> rebin_spline3(const vec<1,TypeY>& y, const vec<1,TypeX>& x, const vec<1,TypeN>& xn) {
+    return interpolate_3spline(y, x, xn);
+}
+
 // template<typename TypeY, typename TypeX, typename TypeN>
 // vec<1,TypeY> rebin_mcspline3(const vec<1,TypeY>& y, const vec<1,TypeX>& x, const vec<1,TypeN>& xn) {
 //     vec<1,TypeY> data(xn.size());

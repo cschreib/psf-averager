@@ -79,7 +79,7 @@ struct psf_moments {
         vif_check(!filter.res.empty(), "uninitialized PSF moments");
 
         tsed *= filter.res;
-        ftot = 0.0; q11 = 0.0; q12 = 0.0; q22 = 0.0, rlam = 0.0;
+        ftot = 0.0; q11 = 0.0; q12 = 0.0; q22 = 0.0; rlam = 0.0;
         for (uint_t l : range(1, filter.lam.size())) {
             ftot += (tsed.safe[l]+tsed.safe[l-1]);
             q11  += (tsed.safe[l]*mono_q11.safe[l]+tsed.safe[l-1]*mono_q11.safe[l-1]);

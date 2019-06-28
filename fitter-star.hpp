@@ -6,8 +6,9 @@
 
 class star_fitter : public fitter_base {
 public :
-    // BPZ PSF library
-    vec1d star_q11, star_q12, star_q22;
+    // Star PSF library
+    vec<1,metrics> star_psf;
+    vec1d star_prob;
 
     // Fit models
     uint_t nmodel = npos;
@@ -29,6 +30,7 @@ public :
     double rel_err = 0.0;
     std::string sed_fit;
     bool save_seds = false;
+    bool prior_no_teff = false;
 
     // Internal variables
     vec1f save_sed_lambda;
@@ -45,7 +47,8 @@ public :
         // Library
         sed_fit = "/home/cschreib/data/fits/templates/PHOENIX-ACES-AGSS-COND-2011-resample.fits";
 
-        opts.read(arg_list(min_mag_err, sed_fit, save_seds));
+        std::string prior_stellar_locus = "/home/cschreib/work_psf/psf-averager/stellar_locus_nep.fits";
+        opts.read(arg_list(min_mag_err, sed_fit, save_seds, prior_no_teff, prior_stellar_locus));
 
         nband = filters.size();
 
@@ -54,7 +57,11 @@ public :
 
         vec1f lam;
         vec2f sed;
+        vec1f teff;
         fits::read_table(sed_fit, "lam", lam, "sed", sed);
+        if (!prior_no_teff) {
+            fits::read_table(sed_fit, "temp", teff);
+        }
 
         nmodel = ntemplate = sed.dims[0];
 
@@ -63,12 +70,18 @@ public :
         }
 
         tpl_flux.resize(nmodel, nband);
-        star_q11.resize(nmodel);
-        star_q12.resize(nmodel);
-        star_q22.resize(nmodel);
+        star_psf.resize(nmodel);
         if (save_seds) {
             save_sed_fluxes.resize(nmodel, save_sed_lambda.size());
         }
+
+        filter_t rest_filter_r, rest_filter_i, rest_filter_z;
+        rest_filter_r = filter_db.read_filter("cfht-r");
+        rest_filter_i = filter_db.read_filter("cfht-i");
+        rest_filter_z = filter_db.read_filter("cfht-z");
+
+        vec1d star_ri(nmodel);
+        vec1d star_iz(nmodel);
 
         for (uint_t it : range(ntemplate)) {
             vec1d olam = lam;
@@ -90,8 +103,44 @@ public :
             }
 
             // Compute PSF moments
-            psf.get_moments(olam, osed, star_q11.safe[it], star_q12.safe[it], star_q22.safe[it]);
+            double q11, q12, q22, rlam, fvis;
+            psf.get_moments(olam, osed, q11, q12, q22, fvis, rlam);
+            star_psf[it] = metrics(q11, q12, q22, rlam);
+
+            // Compute colors
+            double fr = sed2flux(rest_filter_r.lam, rest_filter_r.res, olam, osed);
+            double fi = sed2flux(rest_filter_i.lam, rest_filter_i.res, olam, osed);
+            double fz = sed2flux(rest_filter_z.lam, rest_filter_z.res, olam, osed);
+            star_ri[it] = -2.5*log10(fr/fi);
+            star_iz[it] = -2.5*log10(fi/fz);
         }
+
+        // Attribute prior probability
+        vec2d teff_min, teff_max, prob;
+        vec2u use;
+        vec2f bri, biz;
+        fits::read_table(prior_stellar_locus, ftable(prob, bri, biz, use, teff_min, teff_max));
+
+        star_prob.resize(nmodel);
+        histogram2d(star_ri, star_iz, bri, biz, [&](uint_t iri, uint_t iiz, vec1u ids) {
+            if (ids.empty() || !use(iri,iiz)) return;
+
+            if (prior_no_teff) {
+                star_prob[ids] = prob(iri,iiz)/ids.size();
+            } else {
+                vec1u idt = where(teff[ids] >= teff_min(iri,iiz) && teff[ids] <= teff_max(iri,iiz));
+                if (idt.empty()) {
+                    uint_t mid = min_id(min(
+                        abs(teff[ids] - teff_min(iri,iiz)),
+                        abs(teff[ids] - teff_max(iri,iiz))
+                    ));
+                    idt = {mid};
+                }
+
+                star_prob[ids[idt]] = prob(iri,iiz)/idt.size();
+            }
+        });
+
     }
 
     fit_result do_fit(uint_t iter, const vec1d& ftot) override {
@@ -150,6 +199,7 @@ public :
             uint_t iml = npos;
             double bchi2 = finf;
             double bscale = 0;
+            double tprob = 0.0;
             for (uint_t im : range(nmodel)) {
                 double* wm = &w.wmodel.safe(im,0);
                 double* wf = &w.rflux.safe[0];
@@ -171,10 +221,15 @@ public :
                     bscale = scale;
                     iml = im;
                 }
+
+                double prob = exp(-0.5*(tchi2 - nband))*star_prob.safe[im];
+                fr.psf_obsm.safe[i] += prob*star_psf.safe[im];
+                tprob += prob;
             }
 
             fr.chi2.safe[i] = bchi2;
-            fr.psf_obs.safe[i] = metrics(star_q11.safe[iml], star_q12.safe[iml], star_q22.safe[iml]);
+            fr.psf_obs.safe[i] = star_psf.safe[iml];
+            fr.psf_obsm.safe[i] /= tprob;
 
             if (save_seds) {
                 for (uint_t il : range(save_sed_lambda)) {

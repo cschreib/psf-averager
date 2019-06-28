@@ -11,6 +11,7 @@ public :
     metrics orig_tr;
     vec<1,metrics> indiv_tr;
     vec<2,metrics> indiv_ml;
+    vec<2,metrics> indiv_ma;
     vec1u indiv_id;
     vec1f indiv_mag;
     vec1f indiv_ri;
@@ -20,7 +21,7 @@ public :
 
     // PSF library
     psf_moments& psf;
-    vec1d star_q11, star_q12, star_q22;
+    vec1d star_q11, star_q12, star_q22, star_rlam;
     vec1d star_ri, star_iz;
     vec1d star_prob;
 
@@ -153,6 +154,7 @@ public :
         star_q11.resize(ntemplate);
         star_q12.resize(ntemplate);
         star_q22.resize(ntemplate);
+        star_rlam.resize(ntemplate);
         star_ri.resize(ntemplate);
         star_iz.resize(ntemplate);
         if (save_seds) {
@@ -181,7 +183,9 @@ public :
             }
 
             // Compute PSF moments
-            psf.get_moments(olam, osed, star_q11.safe[it], star_q12.safe[it], star_q22.safe[it]);
+            double fvis;
+            psf.get_moments(olam, osed, star_q11.safe[it], star_q12.safe[it], star_q22.safe[it],
+                fvis, star_rlam.safe[it]);
 
             // Compute colors
             double fr = sed2flux(rest_filter_r.lam, rest_filter_r.res, olam, osed);
@@ -222,6 +226,7 @@ public :
         indiv_tr.resize(niter);
         indiv_chi2.resize(niter, nmc);
         indiv_ml.resize(niter, nmc);
+        indiv_ma.resize(niter, nmc);
     }
 
     void average_seds() {
@@ -255,7 +260,7 @@ public :
                 ftot[id_band_zp_error] *= e10(-0.4*zp_error);
             }
 
-            indiv_tr[iter] = metrics(star_q11[it], star_q12[it], star_q22[it]);
+            indiv_tr[iter] = metrics(star_q11[it], star_q12[it], star_q22[it], star_rlam[it]);
             indiv_id[iter] = it;
             indiv_mag[iter] = mag_grid[im];
             indiv_ri[iter] = star_ri[it];
@@ -268,6 +273,7 @@ public :
             for (uint_t i : range(nmc)) {
                 indiv_chi2.safe(iter,i) = fi.chi2.safe[i];
                 indiv_ml.safe(iter,i) = fi.psf_obs.safe[i];
+                indiv_ma.safe(iter,i) = fi.psf_obsm.safe[i];
             }
 
             progress(pgi);
@@ -285,18 +291,24 @@ public :
 
         file::mkdir(cache_dir);
         fits::write_table(indiv_filename,
-            "id",       indiv_id,
-            "mag",      indiv_mag,
-            "ri",       indiv_ri,
-            "iz",       indiv_iz,
-            "ngal",     indiv_ngal,
-            "e1_true",  get_e1(indiv_tr),
-            "e2_true",  get_e2(indiv_tr),
-            "r2_true",  get_r2(indiv_tr),
-            "chi2_obs", indiv_chi2,
-            "e1_obs",   get_e1(indiv_ml),
-            "e2_obs",   get_e2(indiv_ml),
-            "r2_obs",   get_r2(indiv_ml)
+            "id",        indiv_id,
+            "mag",       indiv_mag,
+            "ri",        indiv_ri,
+            "iz",        indiv_iz,
+            "ngal",      indiv_ngal,
+            "e1_true",   get_e1(indiv_tr),
+            "e2_true",   get_e2(indiv_tr),
+            "r2_true",   get_r2(indiv_tr),
+            "rlam_true", get_rlam(indiv_tr),
+            "chi2_obs",  indiv_chi2,
+            "e1_obs",    get_e1(indiv_ml),
+            "e2_obs",    get_e2(indiv_ml),
+            "r2_obs",    get_r2(indiv_ml),
+            "rlam_obs",  get_rlam(indiv_ml),
+            "e1_obsm",    get_e1(indiv_ma),
+            "e2_obsm",    get_e2(indiv_ma),
+            "r2_obsm",    get_r2(indiv_ma),
+            "rlam_obsm",  get_rlam(indiv_ma)
         );
     }
 };

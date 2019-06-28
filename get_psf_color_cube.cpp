@@ -13,11 +13,13 @@ int vif_main(int argc, char* argv[]) {
     bool no_noise = false;
     std::string dir = "/home/cschreib/work_psf/psf-averager/";
     std::string model_cube = "color_cube.fits";
+    std::string psf_file;
+    std::string catalog;
     uint_t step = 1;
     std::string outfile;
 
     read_args(argc, argv, arg_list(
-        name(tinterp, "interp"), nthread, no_noise, dir, model_cube, step, outfile
+        name(tinterp, "interp"), nthread, no_noise, dir, model_cube, step, outfile, psf_file, catalog
     ));
 
     dir = file::directorize(dir);
@@ -46,7 +48,11 @@ int vif_main(int argc, char* argv[]) {
     }
 
     psf_moments psf(fdb); {
-        program_arguments opts(vec1s{"psf_file="+dir+"psf-mono.fits"});
+        if (psf_file.empty()) {
+            psf_file = dir+"psf-mono.fits";
+        }
+
+        program_arguments opts(vec1s{"psf_file="+psf_file});
         psf.read_options(opts);
     }
 
@@ -137,10 +143,18 @@ int vif_main(int argc, char* argv[]) {
 
     note("read galaxy data");
 
+    std::string catalog_noisy;
+    if (catalog.empty()) {
+        catalog = "compiled.fits";
+        catalog_noisy = "compiled_noisy.fits";
+    } else {
+        catalog_noisy = catalog;
+    }
+
     vec1s bands;
     vec1f depths;
     vec2f flux;
-    fits::read_table("compiled_noisy.fits", ftable(bands, depths));
+    fits::read_table(catalog_noisy, ftable(bands, depths));
 
     vec1u idf(fit_bands.size());
     for (uint_t b : range(fit_bands)) {
@@ -155,9 +169,9 @@ int vif_main(int argc, char* argv[]) {
     uint_t bz = where_first(fit_bands == "sdss-z");
 
     if (!no_noise) {
-        fits::read_table("compiled_noisy.fits", ftable(flux));
+        fits::read_table(catalog_noisy, ftable(flux));
     } else {
-        fits::read_table("compiled.fits", ftable(flux));
+        fits::read_table(catalog, ftable(flux));
     }
 
     uint_t ngal = flux.dims[0];
@@ -282,6 +296,9 @@ int vif_main(int argc, char* argv[]) {
     vec1d e1_best(ngal);
     vec1d e1_best_prob(ngal);
     vec1d e1_marg(ngal);
+    vec1d e2_best(ngal);
+    vec1d e2_best_prob(ngal);
+    vec1d e2_marg(ngal);
     vec1d r2_best(ngal);
     vec1d r2_best_prob(ngal);
     vec1d r2_marg(ngal);
@@ -295,12 +312,19 @@ int vif_main(int argc, char* argv[]) {
     auto get_source_psf = [&](uint_t j) {
         uint_t i = j*step;
         auto p = get_psf(flux(i,idf));
+
         e1_best[i] = p.best.e1;
         e1_best_prob[i] = p.best_prob.e1;
         e1_marg[i] = p.marg.e1;
+
+        e2_best[i] = p.best.e2;
+        e2_best_prob[i] = p.best_prob.e2;
+        e2_marg[i] = p.marg.e2;
+
         r2_best[i] = p.best.r2;
         r2_best_prob[i] = p.best_prob.r2;
         r2_marg[i] = p.marg.r2;
+
         rlam_best[i] = p.best.rlam;
         rlam_best_prob[i] = p.best_prob.rlam;
         rlam_marg[i] = p.marg.rlam;
@@ -329,7 +353,8 @@ int vif_main(int argc, char* argv[]) {
     }
 
     fits::write_table(outfile, ftable(
-        e1_best, e1_best_prob, e1_marg, r2_best, r2_best_prob, r2_marg,
+        e1_best, e1_best_prob, e1_marg, e2_best, e2_best_prob, e2_marg,
+        r2_best, r2_best_prob, r2_marg,
         rlam_best, rlam_best_prob, rlam_marg,
         z_best, z_marg, id_best
     ));

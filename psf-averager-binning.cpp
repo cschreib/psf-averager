@@ -2,82 +2,92 @@
 #include "rebin.hpp"
 
 struct binner_options {
-    vec1f bins = {300.0, 1500.0};
-    vec1f errors = {0.01, 0.03, 0.1, 0.3, 1.0};
-    vec1f biases = {0.00001, 0.00003, 0.0001, 0.0003, 0.001};
-    vec1s rebin = {"cst", "trapz", "spline"};
+    vec1f bins = {5.0, 10.0, 20.0, 50.0, 100.0, 300.0, 500.0, 1500.0};
+    vec1s rebin = {"cst", "trapz", "spline", "mcspline"};
+};
+
+struct shared_data {
+    vec<3,metrics> psf; // [niter,nmeth,nbin]
+    vec<3,metrics> lib; // [nuvj,nmeth,nbin]
+    binner_options opts;
 };
 
 class bin_averager : public psf_averager {
 public :
     // Individuals
-    vec<6,metrics> mb;
-    vec<1,metrics> mtrue;
+    shared_data& shared;
 
-    // Options
-    binner_options opts;
+    bin_averager(filter_database& db, psf_moments& pm, fitter_base& f, shared_data& sh) :
+        psf_averager(db, pm, f), shared(sh) {}
 
-    // Internal variables
-    vec1d uvj_ngal;
-
-    bin_averager() : psf_averager("bin") {}
-
-    void configure_binner(binner_options topts) {
-        opts = topts;
-    }
-
-    void process_cached(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
-        uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {}
-
-    void do_fit(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
+    void on_generated(uint_t iter, uint_t id_mass, uint_t id_type, uint_t id_disk, uint_t id_bulge,
         uint_t id_bt, double tngal, const vec1d& fdisk, const vec1d& fbulge) override {
 
-        uint_t ised = (id_bt == 0 ? id_disk : id_bulge);
-        uvj_ngal.safe[ised] += tngal;
+        psf_averager::on_generated(iter, id_mass, id_type, id_disk, id_bulge, id_bt, tngal,
+            fdisk, fbulge);
+
+        if (just_count) {
+            // Just counting number of iterations
+            return;
+        }
+
+        const double fpsf_bulge = egg_fvis.safe[id_bulge]*bt.safe[id_bt];
+        const double fpsf_disk = egg_fvis.safe[id_disk]*(1.0 - bt.safe[id_bt]);
+        const double fbtn = fpsf_bulge/(fpsf_disk + fpsf_bulge);
+        const double fbti = 1.0 - fbtn;
+
+        for (uint_t ib : range(shared.opts.bins))
+        for (uint_t im : range(shared.opts.rebin)) {
+            auto& pd = shared.lib(id_disk,im,ib);
+            auto& pb = shared.lib(id_bulge,im,ib);
+            shared.psf(iter,im,ib) = metrics(
+                pd.q11*fbti  + pb.q11*fbtn,
+                pd.q12*fbti  + pb.q12*fbtn,
+                pd.q22*fbti  + pb.q22*fbtn,
+                pd.rlam*fbti + pb.rlam*fbtn
+            );
+        }
     }
+};
 
-    void initialize_redshift_bin(uint_t iz) override {}
+class null_fitter : public fitter_base {
+public:
+    shared_data& shared;
+    egg::generator* generator = nullptr;
 
-    std::string make_cache_hash() override {
-        return hash(opts.bins, opts.errors, opts.rebin);
-    }
+    explicit null_fitter(filter_database& db, psf_moments& pm, shared_data& sh) :
+        fitter_base(db, pm), shared(sh) {}
 
-    void initialize_redshift_slice(uint_t itz) override {
-        uvj_ngal.resize(use.size());
-    }
+    void do_prepare_fit(double zf) override {
+        note("preparing library at z=", zf, "...");
 
-    void initialize_cache() override {}
+        uint_t nvj = generator->use.dims[1];
+        uint_t nsed = generator->use.size();
 
-    void finalize_redshift_slice(uint_t itz) override {
-        double zf = uzf[itz];
+        shared.psf.resize(niter, shared.opts.rebin.size(), shared.opts.bins.size());
+        shared.lib.resize(nsed, shared.opts.rebin.size(), shared.opts.bins.size());
 
-        mb.resize(use.size(), opts.bins.size(), opts.rebin.size(), opts.errors.size(), opts.biases.size(), nmc);
-        mtrue.resize(use.size());
+        for (uint_t ised : range(nsed)) {
+            if (!generator->use[ised]) continue;
 
-        uint_t ncomb = opts.bins.size()*opts.errors.size()*opts.biases.size();
-        auto pg = progress_start(count(use)*ncomb);
-        for (uint_t iuv : range(use.dims[0]))
-        for (uint_t ivj : range(use.dims[1])) {
-            if (!use.safe(iuv,ivj)) continue;
+            uint_t iuv = ised / nvj;
+            uint_t ivj = ised % nvj;
 
-            vec1d tlam = lam(iuv,ivj,_);
-            vec1d tsed = sed(iuv,ivj,_);
+            vec1d tlam = generator->lam(iuv,ivj,_);
+            vec1d tsed = generator->sed(iuv,ivj,_);
 
-            if (!naive_igm) {
-                apply_madau_igm(zf, tlam, tsed);
+            if (!generator->naive_igm) {
+                generator->apply_madau_igm(zf, tlam, tsed);
             }
 
-            tsed = lsun2uJy(zf, 1.0, tlam, tsed);
+            double df = lumdist(zf, generator->cosmo);
+            tsed = lsun2uJy(zf, df, tlam, tsed);
             tlam *= (1.0 + zf);
 
-            uint_t ised = iuv*use.dims[1] + ivj;
-
-            mtrue.safe[ised] = metrics(egg_q11.safe[ised], egg_q12.safe[ised], egg_q22.safe[ised]);
-
-            for (uint_t ib : range(opts.bins)) {
+            for (uint_t ib : range(shared.opts.bins)) {
                 // Get binned photometry
                 double lmin = 0.1, lmax = 2.0;
-                double dl = 1e-4*opts.bins[ib];
+                double dl = 1e-4*shared.opts.bins[ib];
                 uint_t npt = (lmax - lmin)/dl;
                 vec1d blam = dl*indgen<double>(npt) + lmin;
                 vec1d fobs(npt);
@@ -87,187 +97,101 @@ public :
                     }
                 }
 
-                uint_t nlam = blam.size();
-                vec2d rnd_noise = randomn(seed, nmc, nlam);
-
-                for (uint_t ie : range(opts.errors))
-                for (uint_t ibe : range(opts.biases)) {
-                    // Normalize errors to zero bias
-                    vec2d cerror(rnd_noise.dims);
-                    for (uint_t l : range(blam)) {
-                        vec1d tmp = e10(0.4*opts.errors.safe[ie]*rnd_noise.safe(_,l));
-                        cerror.safe(_,l) = tmp*(e10(0.4*opts.biases.safe[ibe]*(l-nlam/2.0)*dl*1e3)/mean(tmp));
+                for (uint_t im : range(shared.opts.rebin)) {
+                    // Interpolate
+                    vec1d robs;
+                    if (shared.opts.rebin[im] == "cst") {
+                        robs = rebin_cst(fobs, blam, psf.mono_lam);
+                    } else if (shared.opts.rebin[im] == "trapz") {
+                        robs = rebin_trapz(fobs, blam, psf.mono_lam);
+                    } else if (shared.opts.rebin[im] == "spline") {
+                        robs = rebin_spline3(fobs, blam, psf.mono_lam);
+                    } else if (shared.opts.rebin[im] == "mcspline") {
+                        robs = rebin_mcspline(fobs, blam, psf.mono_lam);
                     }
 
-                    if (ib == 0 && ised == where_first(use)) {
-                        vec2d correl(nlam, nlam);
-                        for (uint_t i : range(nlam))
-                        for (uint_t j : range(nlam)) {
-                            if (j >= i) {
-                                correl(i,j) = mean((cerror(_,i) - 1.0)*(cerror(_,j) - 1.0));
-                            } else {
-                                correl(i,j) = correl(j,i);
-                            }
-                        }
+                    double fvis, q11, q12, q22, rlam;
+                    psf.get_moments_same_grid(robs, q11, q12, q22, fvis, rlam);
 
-                        fits::write("correl_"+to_string(ie)+"-"+to_string(ibe)+".fits", correl);
-                    }
-
-                    for (uint_t i : range(nmc)) {
-                        // Generate perturbed photometry
-                        vec1f tobs = fobs;
-                        for (uint_t l : range(blam)) {
-                            tobs.safe[l] *= cerror.safe(i,l);
-                        }
-
-                        for (uint_t im : range(opts.rebin)) {
-                            // Interpolate
-                            vec1d robs;
-                            if (opts.rebin[im] == "cst") {
-                                robs = rebin_cst(tobs, blam, psf_filter.lam);
-                            } else if (opts.rebin[im] == "trapz") {
-                                robs = rebin_trapz(tobs, blam, psf_filter.lam);
-                            } else if (opts.rebin[im] == "lin") {
-                                // No need: actually indistinguishable from trapz
-                                robs = interpolate(tobs, blam, psf_filter.lam);
-                            } else if (opts.rebin[im] == "spline") {
-                                robs = rebin_mcspline(tobs, blam, psf_filter.lam);
-                            }
-
-                            // Compute PSF
-                            robs *= psf_filter.res;
-                            double fvis = integrate(psf_filter.lam, robs);
-                            mb.safe(ised,ib,im,ie,ibe,i) = metrics(
-                                integrate(psf_filter.lam, robs*mono_q11)/fvis,
-                                integrate(psf_filter.lam, robs*mono_q12)/fvis,
-                                integrate(psf_filter.lam, robs*mono_q22)/fvis
-                            );
-
-                            // if (ib == 0 && ie == 5 && i == 0) {
-                            //     fits::write_table("rebin_"+opts.rebin[im]+".fits",
-                            //         "blam", blam, "bflx", tobs,
-                            //         "elam", psf_filter.lam, "eflx", robs/psf_filter.res,
-                            //         "olam", tlam, "oflx", tsed
-                            //     );
-                            // }
-                        }
-                    }
-
-                    progress(pg);
+                    shared.lib(ised,im,ib) = metrics(q11, q12, q22, rlam);
                 }
             }
         }
-
-        vec1f uv = -2.5*log10(egg_fu/egg_fv);
-        vec1f vj = -2.5*log10(egg_fv/egg_fj);
-
-        // Write to disk the individual measurements
-        file::mkdir(cache_dir);
-        fits::write_table(indiv_filename,
-            "e1_true",  get_e1(mtrue),
-            "e2_true",  get_e2(mtrue),
-            "r2_true",  get_r2(mtrue),
-            "e1_obs",   get_e1(mb),
-            "e2_obs",   get_e2(mb),
-            "r2_obs",   get_r2(mb),
-            "bins",     opts.bins,
-            "errors",   opts.errors,
-            "biases",   opts.biases,
-            "rebin",    opts.rebin,
-            "ngal",     uvj_ngal,
-            "use",      use,
-            "uv",       uv,
-            "vj",       vj
-        );
     }
 
-    void finalize_redshift_bin(uint_t iz, double ntot, double ntot_qu, double ntot_sf) override {}
+    fit_result do_fit(uint_t iter, const vec1d& ftot) override {
+        fit_result fr(nmc);
+        return fr;
+    }
+
+    void save_individuals(const std::string& filename) override {
+        // Write to disk the individual measurements
+        fits::table otbl(filename);
+        otbl.update_column("e1_bin", get_e1(shared.psf));
+        otbl.update_column("e2_bin", get_e2(shared.psf));
+        otbl.update_column("r2_bin", get_r2(shared.psf));
+        otbl.update_column("rlam_bin", get_rlam(shared.psf));
+        otbl.update_column("bins", shared.opts.bins);
+        otbl.update_column("rebin", shared.opts.rebin);
+    }
 };
 
 int vif_main(int argc, char* argv[]) {
-    // External data
-    std::string share_dir = "/home/cschreib/code/egg-analytic/share/";
-    std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
-    std::string sed_lib = "/home/cschreib/code/egg-analytic/share/opt_lib_fastpp_hd_noigm.fits";
-    std::string sed_imf = "chabrier";
-    std::string psf_file  = "/home/cschreib/code/euclid_psf/psf-averager/psf-mono.fits";
-
-    // Survey definition
-    double maglim = 24.5;
-    std::string selection_band = "euclid-vis";
-
-    // Mock photometry
-    uint_t nmc = 100;
-    double dz = 0.01;
-    uint_t seds_step = 1;
-    bool write_cache = false;
-    bool use_cache = false;
-    bool write_individuals = false;
-    bool write_averages = false;
-    uint_t nthread = 0;
     uint_t iz = 5;
-    std::string cache_id = "rebin";
-    std::string cache_dir = "cache";
-    double prob_limit = 0.1;
-    vec1f bins = {300.0, 1500.0};
-    vec1f errors = {0.01, 0.03, 0.1, 0.3, 1.0};
-    vec1f biases = {0.00001, 0.00003, 0.0001, 0.0003, 0.001};
-    vec1s rebin = {"cst", "lin", "trapz", "spline"};
+    bool allbins = false;
 
-    read_args(argc, argv, arg_list(
-        maglim, selection_band, nmc, dz, seds_step, write_cache, use_cache, iz, share_dir,
-        filter_db, psf_file, nthread, write_individuals, write_averages, cache_id, sed_lib,
-        sed_imf, cache_dir, prob_limit, bins, errors, biases, rebin
-    ));
+    shared_data shared;
+    filter_database db;
+    psf_moments psf(db);
+    null_fitter fitter(db, psf, shared);
+    bin_averager pavg(db, psf, fitter, shared);
 
-    bin_averager bavg;
-    bavg.write_cache = write_cache;
-    bavg.use_cache = use_cache;
+    fitter.generator = &pavg;
 
-    // Setup survey
-    egg::generator_options opts;
-    opts.share_dir = share_dir;
-    opts.filter_db = filter_db;
-    opts.sed_lib = sed_lib;
-    opts.sed_lib_imf = sed_imf;
-    opts.filter_flambda = true;
-    opts.filter_photons = true;
-    opts.trim_filters = true;
-    opts.selection_band = selection_band;
-    opts.maglim = maglim;
-    opts.logmass_steps = 50;
-    opts.bt_steps = 2;
-    opts.logmass_max = 12.0;
-    opts.seds_step = seds_step;
-    opts.nthread = nthread;
-    bavg.initialize(opts);
+    // Read setup
+    {
+        program_arguments opts(argc, argv);
 
-    // Setup mock
-    mock_options mopts;
-    mopts.nmc = nmc;
-    mopts.dz = dz;
-    mopts.psf_file = psf_file;
-    mopts.write_individuals = write_individuals;
-    mopts.write_averages = write_averages;
-    mopts.force_cache_id = cache_id;
-    mopts.cache_dir = cache_dir;
-    mopts.prob_limit = prob_limit;
-    bavg.configure_mock(mopts);
+        // Override options
+        {
+            bool filter_flambda = true; // equivalent to FILTER_FORMAT=1
+            bool filter_photons = true; // equivalent to FILTER_FORMAT=1
+            bool trim_filters = true;
+            opts.write(arg_list(filter_flambda, filter_photons, trim_filters));
+        }
 
-    // Setup binning
-    binner_options bopts;
-    bopts.bins = bins;
-    bopts.errors = errors;
-    bopts.biases = biases;
-    bopts.rebin = rebin;
-    bavg.configure_binner(bopts);
+        // Default options
+        {
+            std::string filter_db = "/home/cschreib/code/euclid_psf/psf-averager/filters.dat";
+            opts.read(arg_list(filter_db));
+        }
+
+        // Setup binning
+        opts.read(arg_list(shared.opts.bins, shared.opts.rebin));
+
+        // Setup filter database
+        db.read_options(opts);
+
+        // Setup PSF moments
+        psf.read_options(opts);
+
+        // Setup survey
+        pavg.read_options(opts);
+
+        // Setup fitter
+        fitter.read_options(opts);
+
+        opts.read(arg_list(iz, allbins));
+    }
 
     // Average PSF metrics
-    // for (uint_t iz : range(bavg.zb)) {
-    //     if (!bavg.average_redshift_bin(iz)) continue;
-    // }
-
-    if (!bavg.average_redshift_bin(iz)) return 1;
+    if (allbins) {
+        for (uint_t tiz : range(pavg.zb.size()-1)) {
+            if (!pavg.average_redshift_bin(tiz)) return 1;
+        }
+    } else {
+        if (!pavg.average_redshift_bin(iz)) return 1;
+    }
 
     return 0;
 }
