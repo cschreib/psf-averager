@@ -176,7 +176,11 @@ public :
         if (use_egg_library) {
             tsed_dir = "SED_EGG/";
         } else if (use_eggpp_library) {
-            tsed_dir = "SED_EGG++/";
+            if (use_noline_library) {
+                tsed_dir = "SED_EGG++/";
+            } else {
+                tsed_dir = "SED_EGG++-lines/";
+            }
         } else {
             if (use_capak_library) {
                 if (use_noline_library) {

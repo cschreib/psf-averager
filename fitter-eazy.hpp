@@ -211,7 +211,11 @@ public :
         if (use_egg_library) {
             std::string tsed_dir;
             if (fopts.use_eggpp_library) {
-                tsed_dir = sed_dir+"EGG++/";
+                if (fopts.use_noline_library) {
+                    tsed_dir = sed_dir+"EGG++/";
+                } else {
+                    tsed_dir = sed_dir+"EGG++-lines/";
+                }
                 eazy_seds = tsed_dir+file::list_files(tsed_dir, "*.sed");
             } else {
                 tsed_dir = sed_dir+"EGG/";
