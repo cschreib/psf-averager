@@ -29,7 +29,8 @@ void rebin_generic(const vec<1,TypeX>& x, const vec<1,TypeN>& xn, F&& func) {
         }
 
         if (i == 0) {
-            vif_check(xedges[0] >= xl[0], "requested grid would extrapolate data");
+            vif_check(xedges[0] >= xl[0], "requested grid would extrapolate data (",
+                xl[0], " vs ", xedges[0], ")");
             i0 = lower_bound(xu, xedges[0]);
         }
 
@@ -37,7 +38,8 @@ void rebin_generic(const vec<1,TypeX>& x, const vec<1,TypeN>& xn, F&& func) {
             ++i0;
         }
 
-        vif_check(i0 != xu.size(), "requested grid would extrapolate data");
+        vif_check(i0 != xu.size(), "requested grid would extrapolate data (",
+            xu.back(), " vs " xedges.back(), ")");
 
         iedges.safe[i] = i0;
     }
